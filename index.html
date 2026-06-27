@@ -154,6 +154,12 @@
   </div>
 
   <div class="group">
+    <div class="lbl">Inspired by Escher (method)</div>
+    <div class="pat-grid" id="inspGrid" style="grid-template-columns:1fr 1fr"></div>
+    <div class="hint" style="margin-top:8px">Jumps to the <b>symmetry</b> Escher used for that effect, then you deform &amp; fill it. Loads the <i>method</i>, not his artwork.</div>
+  </div>
+
+  <div class="group">
     <div class="lbl">2 · Tool</div>
     <div class="tools" id="toolBar">
       <div class="tool on" data-tool="shape"><div class="ti">✎</div><div class="tn">Shape</div></div>
@@ -1425,6 +1431,24 @@ document.getElementById('advVary').addEventListener('click',()=>{
   advParams=def.map(p=>p+rnd(-0.13,0.13)); advBuild(); draw();
 });
 document.getElementById('advReset').addEventListener('click',()=>{ advParams=null; advBuild(); draw(); });
+
+/* ---- "Inspired by Escher" method presets (symmetry only, no artwork) ---- */
+const INSPIRE=[
+  {n:'Horsemen',  s:'glide reflection', t:'glide', tpl:'Wave'},
+  {n:'Pegasus',   s:'translation',      t:'sqT',   tpl:'Bird'},
+  {n:'Lizards',   s:'3-fold (hex)',     t:'rot3',  tpl:'Claw'},
+  {n:'Two Fish',  s:'2-fold',           t:'rot2',  tpl:'Fish'},
+  {n:'Pinwheel',  s:'4-fold',           t:'rot4',  tpl:'Jigsaw'},
+  {n:'Honeycomb', s:'hex translation',  t:'hexT',  tpl:'Jigsaw'},
+];
+(function(){const ig=document.getElementById('inspGrid');
+  INSPIRE.forEach(p=>{
+    const el=document.createElement('div'); el.className='pat';
+    el.innerHTML='<div class="nm">'+p.n+'</div><div class="gp">'+p.s+'</div>';
+    el.addEventListener('click',()=>{ setPattern(p.t); setShape(p.tpl); draw(); });
+    ig.appendChild(el);
+  });
+})();
 
 /* boot */
 setPattern('sqT');
