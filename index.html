@@ -204,6 +204,7 @@
   </div>
 
   <div class="group">
+    <button class="act" id="btnUndo">↶ Undo (⌘/Ctrl-Z)</button>
     <button class="act primary" id="btnGen">✨ Idea generator</button>
     <button class="act" id="btnSaveColl">★ Save to my collection</button>
     <button class="act" id="btnAI">🤖 AI fill workflow</button>
@@ -870,7 +871,7 @@ cv.addEventListener('contextmenu',e=>{
   if(tool!=='shape'||engine!=='simple'){e.preventDefault();return;}
   e.preventDefault();
   const h=nearestHandle(mouse(e), 14*14);
-  if(h && edgePts[h.owner].length>0){ edgePts[h.owner].splice(h.idx,1); draw(); }
+  if(h && edgePts[h.owner].length>0){ pushUndo(); edgePts[h.owner].splice(h.idx,1); draw(); }
 });
 
 cv.addEventListener('mousedown',e=>{
@@ -879,11 +880,11 @@ cv.addEventListener('mousedown',e=>{
   if(tool==='shape'){
     if(engine!=='simple') return;
     const h=nearestHandle(sp, 13*13);
-    if(h) drag=h;
+    if(h){ pushUndo(); drag=h; }
     return;
   }
-  if(tool==='draw'){ curStroke={color:val('colPen'), w:parseFloat(val('penW')), pts:[lp]}; return; }
-  if(tool==='erase'){ eraseAt(lp); return; }
+  if(tool==='draw'){ pushUndo(); curStroke={color:val('colPen'), w:parseFloat(val('penW')), pts:[lp]}; return; }
+  if(tool==='erase'){ pushUndo(); eraseAt(lp); return; }
 });
 window.addEventListener('mousemove',e=>{
   if(panStart){ pan.x=e.clientX-panStart.x; pan.y=e.clientY-panStart.y; draw(); return; }
@@ -907,7 +908,7 @@ cv.addEventListener('dblclick',e=>{
     const d=edgeScreenDist2(i, sp);
     if(!best||d<best.d) best={i,d};
   }
-  if(best && best.d < 18*18){ addPointToEdge(best.i, toLocal(sp)); draw(); }
+  if(best && best.d < 18*18){ pushUndo(); addPointToEdge(best.i, toLocal(sp)); draw(); }
 });
 cv.addEventListener('wheel',e=>{
   e.preventDefault();
@@ -949,7 +950,7 @@ PATTERNS.forEach(p=>{
   const el=document.createElement('div');
   el.className='pat'; el.dataset.type=p.type;
   el.innerHTML=patIcon(p.type)+'<div class="nm">'+p.name+'</div><div class="gp">'+p.gp+'</div>';
-  el.addEventListener('click',()=>setPattern(p.type));
+  el.addEventListener('click',()=>{ pushUndo(); setPattern(p.type); });
   grid.appendChild(el);
 });
 // starter-shape previews (rendered on a square tile)
@@ -966,7 +967,7 @@ Object.keys(TEMPLATES).forEach(name=>{
   const el=document.createElement('div');
   el.className='pat'; el.dataset.tpl=name;
   el.innerHTML=tplIcon(name)+'<div class="nm">'+name+'</div>';
-  el.addEventListener('click',()=>{ setShape(name); draw();
+  el.addEventListener('click',()=>{ pushUndo(); setShape(name); draw();
     document.querySelectorAll('#tplGrid .pat').forEach(x=>x.classList.toggle('on',x===el)); });
   tplGrid.appendChild(el);
 });
@@ -980,8 +981,8 @@ document.querySelectorAll('.tool').forEach(t=>t.addEventListener('click',()=>{
 ['colA','colB','colOutline','colPen','twoTone','outW','penW','showHandles','dimOthers','traceImg']
   .forEach(id=>document.getElementById(id).addEventListener('input',draw));
 document.getElementById('scale').addEventListener('input',e=>{scale=+e.target.value;draw();});
-document.getElementById('btnReset').addEventListener('click',()=>{resetShape();draw();});
-document.getElementById('btnClearDraw').addEventListener('click',()=>{strokes=[];draw();});
+document.getElementById('btnReset').addEventListener('click',()=>{pushUndo();resetShape();draw();});
+document.getElementById('btnClearDraw').addEventListener('click',()=>{pushUndo();strokes=[];draw();});
 
 document.getElementById('btnPng').addEventListener('click',()=>{
   const a=document.createElement('a');
@@ -1031,6 +1032,40 @@ function loadState(s){
   if(s.texImageURL){ loadTexFromURL(s.texImageURL, ()=>{ buildProcessedTex(); draw(); }); }
   draw();
 }
+
+/* ============================================================
+   Undo / redo  (Cmd/Ctrl-Z, Cmd/Ctrl-Shift-Z)
+   ============================================================ */
+let undoStack=[], redoStack=[], restoringState=false;
+function captureState(){
+  return { snap:snapshot(true), engine, advTypeIndex, advParams: advParams?advParams.slice():null };
+}
+function restoreState(st){
+  restoringState=true;
+  loadState(JSON.parse(st.snap));     // restores pattern, edges, strokes, texture, colors…
+  if(st.engine==='advanced'){
+    engine='advanced'; advTypeIndex=st.advTypeIndex; advParams=st.advParams?st.advParams.slice():null;
+    advBuild(); advUI();
+    document.getElementById('advCtl').style.display='';
+    document.getElementById('btnAdvanced').style.display='none';
+    draw();
+  }
+  restoringState=false;
+}
+function pushUndo(){                   // call BEFORE a state-changing user action
+  if(restoringState) return;
+  undoStack.push(captureState());
+  if(undoStack.length>40) undoStack.shift();
+  redoStack.length=0;
+}
+function doUndo(){ if(!undoStack.length) return; redoStack.push(captureState()); restoreState(undoStack.pop()); }
+function doRedo(){ if(!redoStack.length) return; undoStack.push(captureState()); restoreState(redoStack.pop()); }
+window.addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase();
+  if((e.metaKey||e.ctrlKey) && k==='z'){ e.preventDefault(); e.shiftKey?doRedo():doUndo(); }
+  else if((e.metaKey||e.ctrlKey) && k==='y'){ e.preventDefault(); doRedo(); }
+});
+document.getElementById('btnUndo').addEventListener('click',doUndo);
 
 /* ============================================================
    Idea generator — random tiles you rate, then evolve the good ones
@@ -1274,6 +1309,7 @@ function renderSaved(){
 }
 function renderActive(){ (galleryMode==='saved'?renderSaved:renderGallery)(); }
 function useGenome(type, ep){
+  pushUndo();
   setPattern(type);
   edgePts=cloneEp(ep);
   closeGen(); draw();
@@ -1392,7 +1428,7 @@ document.getElementById('aiDownload').addEventListener('click',()=>{
 });
 document.getElementById('aiImport').addEventListener('click',()=>{
   const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
-  inp.onchange=()=>{const f=inp.files[0]; if(!f)return; const r=new FileReader();
+  inp.onchange=()=>{const f=inp.files[0]; if(!f)return; pushUndo(); const r=new FileReader();
     r.onload=()=>loadTexFromURL(r.result,()=>{ useTexture=true; document.getElementById('aiUse').checked=true; buildProcessedTex(); aiStatusText(); draw(); });
     r.readAsDataURL(f);};
   inp.click();
@@ -1406,6 +1442,7 @@ document.getElementById('blendWhite').addEventListener('change',()=>{ buildProce
 document.getElementById('blendAmt').addEventListener('input',()=>{ buildProcessedTex(); draw(); });
 document.getElementById('stampMode').addEventListener('change',draw);
 document.getElementById('aiRemove').addEventListener('click',()=>{
+  pushUndo();
   texImage=null; texImageURL=null; useTexture=false;
   document.getElementById('aiUse').checked=false; aiStatusText(); draw();
 });
@@ -1417,20 +1454,22 @@ function advUI(){
 }
 function advGo(i){ advTypeIndex=((i%81)+81)%81; advParams=null; advBuild(); advUI(); draw(); }
 document.getElementById('btnAdvanced').addEventListener('click',()=>{
+  pushUndo();
   engine='advanced';
   document.querySelectorAll('.pat').forEach(e=>e.classList.remove('on'));
   document.getElementById('advCtl').style.display='';
   document.getElementById('btnAdvanced').style.display='none';
   advParams=null; advBuild(); advUI(); draw();
 });
-document.getElementById('btnSimple').addEventListener('click',()=>setPattern(pat?pat.type:'sqT'));
-document.getElementById('advPrev').addEventListener('click',()=>advGo(advTypeIndex-1));
-document.getElementById('advNext').addEventListener('click',()=>advGo(advTypeIndex+1));
+document.getElementById('btnSimple').addEventListener('click',()=>{pushUndo();setPattern(pat?pat.type:'sqT');});
+document.getElementById('advPrev').addEventListener('click',()=>{pushUndo();advGo(advTypeIndex-1);});
+document.getElementById('advNext').addEventListener('click',()=>{pushUndo();advGo(advTypeIndex+1);});
 document.getElementById('advVary').addEventListener('click',()=>{
+  pushUndo();
   const def=new TACT.IsohedralTiling(TACT.tilingTypes[advTypeIndex]).getParameters();
   advParams=def.map(p=>p+rnd(-0.13,0.13)); advBuild(); draw();
 });
-document.getElementById('advReset').addEventListener('click',()=>{ advParams=null; advBuild(); draw(); });
+document.getElementById('advReset').addEventListener('click',()=>{ pushUndo(); advParams=null; advBuild(); draw(); });
 
 /* ---- "Inspired by Escher" method presets (symmetry only, no artwork) ---- */
 // Escher's creature tilings use only the 7 reflection-free wallpaper groups
@@ -1448,7 +1487,7 @@ const INSPIRE=[
   INSPIRE.forEach(p=>{
     const el=document.createElement('div'); el.className='pat';
     el.innerHTML='<div class="nm">'+p.n+'</div><div class="gp">'+p.s+'</div>';
-    el.addEventListener('click',()=>{ setPattern(p.t); setShape(p.tpl); draw(); });
+    el.addEventListener('click',()=>{ pushUndo(); setPattern(p.t); setShape(p.tpl); draw(); });
     ig.appendChild(el);
   });
 })();
