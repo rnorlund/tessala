@@ -1,0 +1,13 @@
+# Whitelist approach: ignore everything, then allow only the app files.
+*
+!.gitignore
+!index.html
+!README.md
+!LICENSE.md
+!vendor/
+vendor/*
+!vendor/tactile.js
+!vendor/tactile.global.js
+!docs/
+docs/*
+!docs/hero.png
