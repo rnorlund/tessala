@@ -156,7 +156,7 @@
   <div class="group">
     <div class="lbl">Inspired by Escher (method)</div>
     <div class="pat-grid" id="inspGrid" style="grid-template-columns:1fr 1fr"></div>
-    <div class="hint" style="margin-top:8px">Jumps to the <b>symmetry</b> Escher used for that effect, then you deform &amp; fill it. Loads the <i>method</i>, not his artwork.</div>
+    <div class="hint" style="margin-top:8px">Escher's creatures use only <b>7 of the 17</b> wallpaper groups — the <b>mirror-free</b> ones (a mirror forces a straight edge; animals have none). These jump to that symmetry; deform &amp; fill to make your own. <i>(p6 “Butterflies” &amp; pgg live in the Advanced engine.)</i></div>
   </div>
 
   <div class="group">
@@ -1433,13 +1433,16 @@ document.getElementById('advVary').addEventListener('click',()=>{
 document.getElementById('advReset').addEventListener('click',()=>{ advParams=null; advBuild(); draw(); });
 
 /* ---- "Inspired by Escher" method presets (symmetry only, no artwork) ---- */
+// Escher's creature tilings use only the 7 reflection-free wallpaper groups
+// (p1, p2, p3, p4, p6, pg, pgg) — mirrors would force straight edges. These map
+// the symmetry behind famous works; p6/pgg live in the Advanced engine.
 const INSPIRE=[
-  {n:'Horsemen',  s:'glide reflection', t:'glide', tpl:'Wave'},
-  {n:'Pegasus',   s:'translation',      t:'sqT',   tpl:'Bird'},
-  {n:'Lizards',   s:'3-fold (hex)',     t:'rot3',  tpl:'Claw'},
-  {n:'Two Fish',  s:'2-fold',           t:'rot2',  tpl:'Fish'},
-  {n:'Pinwheel',  s:'4-fold',           t:'rot4',  tpl:'Jigsaw'},
-  {n:'Honeycomb', s:'hex translation',  t:'hexT',  tpl:'Jigsaw'},
+  {n:'Horsemen',   s:'glide · pg',        t:'glide', tpl:'Wave'},
+  {n:'Pegasus',    s:'translation · p1',  t:'sqT',   tpl:'Bird'},
+  {n:'Lizards',    s:'3-fold · p3',       t:'rot3',  tpl:'Claw'},
+  {n:'Fish #20',   s:'4-fold · p4',       t:'rot4',  tpl:'Fish'},
+  {n:'Whirl fish', s:'2-fold · p2',       t:'rot2',  tpl:'Fish'},
+  {n:'Honeycomb',  s:'hex · p1',          t:'hexT',  tpl:'Jigsaw'},
 ];
 (function(){const ig=document.getElementById('inspGrid');
   INSPIRE.forEach(p=>{
