@@ -127,6 +127,11 @@
   .aiHead button{background:var(--panel2); border:1px solid var(--line); color:var(--ink);
     border-radius:8px; padding:7px 12px; cursor:pointer}
   .aiP{color:var(--muted); font-size:13px; margin:0 0 16px}
+  .aiAuto{background:#22303a; border:1px solid var(--accent); border-radius:10px; padding:14px; margin-bottom:8px}
+  .aiAutoRow{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px}
+  .aiAutoRow input{flex:1 1 180px; background:#1c1f26; color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:9px; font-size:13px}
+  .aiAutoRow select{background:#1c1f26; color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:9px}
+  .aiOr{text-align:center; color:var(--muted); font-size:12px; margin:10px 0}
   .aiGrid{display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px}
   .aiStep{background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:12px; display:flex; flex-direction:column}
   .aiNum{font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--accent); font-weight:700; margin-bottom:10px}
@@ -239,7 +244,24 @@
 <div id="aiModal">
   <div id="aiCard">
     <div class="aiHead"><h2>🤖 AI fill workflow</h2><button id="aiClose">Close</button></div>
-    <p class="aiP">Turn this tile into a picture with ChatGPT (or any image AI), then drop the result back in. It’s re-clipped to your exact shape, so it always fits the tiling.</p>
+
+    <div class="aiAuto">
+      <div class="aiNum">⚡ Auto-fill with your OpenAI key (one click)</div>
+      <div class="aiAutoRow">
+        <input id="aiKey" type="password" placeholder="OpenAI API key (sk-…) — stored only in this browser" autocomplete="off">
+        <input id="aiSubjectA" placeholder="what to draw — e.g. a koi fish, a barn owl">
+        <select id="aiQuality">
+          <option value="low">low · cheapest</option>
+          <option value="medium" selected>medium</option>
+          <option value="high">high · best</option>
+        </select>
+        <button class="act primary" id="aiAutoBtn" style="margin:0;white-space:nowrap">⚡ Generate &amp; fill</button>
+      </div>
+      <div class="aiHint" id="aiAutoStatus">Uses <b>gpt-image-1</b> (a few cents per image). Generates the picture, sizes it to your tile, and fills the tiling automatically.</div>
+    </div>
+    <div class="aiOr">— or do it by hand with ChatGPT —</div>
+
+    <p class="aiP">Turn this tile into a picture with any image AI, then drop the result back in. It’s re-clipped to your exact shape, so it always fits the tiling.</p>
     <div class="aiGrid">
       <div class="aiStep">
         <div class="aiNum">1 · Export the shape</div>
@@ -1526,9 +1548,45 @@ function openAI(){
   drawAIPreview();
   document.getElementById('aiPrompt').value=defaultPrompt(document.getElementById('aiSubject').value);
   document.getElementById('aiUse').checked=useTexture;
+  document.getElementById('aiKey').value=localStorage.getItem('tess_openai_key')||'';
   aiStatusText();
 }
 function closeAI(){ document.getElementById('aiModal').classList.remove('show'); }
+// one-click auto-fill via the OpenAI image API (browser-direct; CORS-enabled)
+async function autoFill(){
+  const status=document.getElementById('aiAutoStatus');
+  const key=document.getElementById('aiKey').value.trim();
+  if(!key){ status.textContent='⚠ Enter your OpenAI API key first.'; return; }
+  localStorage.setItem('tess_openai_key', key);
+  const subject=document.getElementById('aiSubjectA').value || document.getElementById('aiSubject').value;
+  const quality=document.getElementById('aiQuality').value;
+  const btn=document.getElementById('aiAutoBtn'); btn.disabled=true;
+  status.textContent='⏳ Generating with gpt-image-1… (10–40s)';
+  try{
+    const shapeBlob=await (await fetch(buildShapePNG())).blob();   // also locks texFrame for alignment
+    const fd=new FormData();
+    fd.append('model','gpt-image-1');
+    fd.append('image', shapeBlob, 'shape.png');
+    fd.append('prompt', defaultPrompt(subject));
+    fd.append('size','1024x1024');
+    fd.append('quality', quality);
+    fd.append('background','transparent');
+    fd.append('n','1');
+    const res=await fetch('https://api.openai.com/v1/images/edits',{method:'POST',headers:{Authorization:'Bearer '+key},body:fd});
+    if(!res.ok){ let msg; try{msg=(await res.json()).error.message;}catch(e){msg=await res.text();} throw new Error('HTTP '+res.status+' — '+(msg||'').slice(0,200)); }
+    const j=await res.json();
+    const b64=j.data&&j.data[0]&&j.data[0].b64_json;
+    if(!b64) throw new Error('No image returned.');
+    pushUndo();
+    loadTexFromURL('data:image/png;base64,'+b64, ()=>{
+      useTexture=true; document.getElementById('aiUse').checked=true; buildProcessedTex(); aiStatusText(); draw();
+      status.textContent='✓ Done — filled! Tweak zoom/colours on the right, or Generate again for a new take.';
+    });
+  }catch(err){
+    status.textContent='✗ '+err.message+(/40[13]|verif/i.test(err.message)?'  (gpt-image-1 needs a verified org + credits — check platform.openai.com billing.)':'');
+  }
+  btn.disabled=false;
+}
 function loadTexFromURL(url, cb){
   const img=new Image();
   img.onload=()=>{ texImage=img; texImageURL=url; if(!texFrame) texFrame=computeTexFrame(buildOutline()); cb&&cb(); };
@@ -1537,6 +1595,7 @@ function loadTexFromURL(url, cb){
 let texImageURL=null;
 document.getElementById('btnAI').addEventListener('click',openAI);
 document.getElementById('aiClose').addEventListener('click',closeAI);
+document.getElementById('aiAutoBtn').addEventListener('click',autoFill);
 document.getElementById('aiSubject').addEventListener('input',e=>{
   document.getElementById('aiPrompt').value=defaultPrompt(e.target.value);
 });
