@@ -250,14 +250,20 @@
       <div class="aiAutoRow">
         <input id="aiKey" type="password" placeholder="OpenAI API key (sk-…) — stored only in this browser" autocomplete="off">
         <input id="aiSubjectA" placeholder="what to draw — e.g. a koi fish, a barn owl">
+      </div>
+      <div class="aiAutoRow">
+        <select id="aiMode" title="how the picture is used">
+          <option value="creature" selected>clean creature → stamp (best, like ChatGPT)</option>
+          <option value="outline">fit to tile outline (stained-glass)</option>
+        </select>
         <select id="aiQuality">
           <option value="low">low · cheapest</option>
-          <option value="medium" selected>medium</option>
-          <option value="high">high · best</option>
+          <option value="medium">medium</option>
+          <option value="high" selected>high · best</option>
         </select>
         <button class="act primary" id="aiAutoBtn" style="margin:0;white-space:nowrap">⚡ Generate &amp; fill</button>
       </div>
-      <div class="aiHint" id="aiAutoStatus">Uses <b>gpt-image-1</b> (a few cents per image). Generates the picture, sizes it to your tile, and fills the tiling automatically.</div>
+      <div class="aiHint" id="aiAutoStatus">Uses <b>gpt-image-1</b> (~$0.02–0.17/image). "Clean creature" draws a crisp animal and tiles it as a flock — the nicest results.</div>
     </div>
     <div class="aiOr">— or do it by hand with ChatGPT —</div>
 
@@ -1559,29 +1565,41 @@ async function autoFill(){
   const key=document.getElementById('aiKey').value.trim();
   if(!key){ status.textContent='⚠ Enter your OpenAI API key first.'; return; }
   localStorage.setItem('tess_openai_key', key);
-  const subject=document.getElementById('aiSubjectA').value || document.getElementById('aiSubject').value;
+  const subject=(document.getElementById('aiSubjectA').value || document.getElementById('aiSubject').value || 'animal').trim();
   const quality=document.getElementById('aiQuality').value;
+  const mode=document.getElementById('aiMode').value;
   const btn=document.getElementById('aiAutoBtn'); btn.disabled=true;
   status.textContent='⏳ Generating with gpt-image-1… (10–40s)';
   try{
-    const shapeBlob=await (await fetch(buildShapePNG())).blob();   // also locks texFrame for alignment
-    const fd=new FormData();
-    fd.append('model','gpt-image-1');
-    fd.append('image', shapeBlob, 'shape.png');
-    fd.append('prompt', defaultPrompt(subject));
-    fd.append('size','1024x1024');
-    fd.append('quality', quality);
-    fd.append('background','transparent');
-    fd.append('n','1');
-    const res=await fetch('https://api.openai.com/v1/images/edits',{method:'POST',headers:{Authorization:'Bearer '+key},body:fd});
+    let res;
+    if(mode==='outline'){
+      // strict: fill the tile outline (stained-glass look)
+      const shapeBlob=await (await fetch(buildShapePNG())).blob();   // locks texFrame for alignment
+      const fd=new FormData();
+      fd.append('model','gpt-image-1'); fd.append('image', shapeBlob, 'shape.png');
+      fd.append('prompt', defaultPrompt(subject));
+      fd.append('size','1024x1024'); fd.append('quality', quality); fd.append('background','transparent'); fd.append('n','1');
+      res=await fetch('https://api.openai.com/v1/images/edits',{method:'POST',headers:{Authorization:'Bearer '+key},body:fd});
+    } else {
+      // clean free-standing creature (best quality), to be stamped into a flock
+      const prompt='A single stylized '+subject+' with bold, flat, high-contrast colours and clean thick black outlines, '
+        +'centred and filling the frame, on a fully transparent background. No scenery, no text, no shadow.';
+      res=await fetch('https://api.openai.com/v1/images/generations',{method:'POST',
+        headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},
+        body:JSON.stringify({model:'gpt-image-1',prompt,size:'1024x1024',quality,background:'transparent',n:1})});
+    }
     if(!res.ok){ let msg; try{msg=(await res.json()).error.message;}catch(e){msg=await res.text();} throw new Error('HTTP '+res.status+' — '+(msg||'').slice(0,200)); }
     const j=await res.json();
     const b64=j.data&&j.data[0]&&j.data[0].b64_json;
     if(!b64) throw new Error('No image returned.');
     pushUndo();
     loadTexFromURL('data:image/png;base64,'+b64, ()=>{
-      useTexture=true; document.getElementById('aiUse').checked=true; buildProcessedTex(); aiStatusText(); draw();
-      status.textContent='✓ Done — filled! Tweak zoom/colours on the right, or Generate again for a new take.';
+      useTexture=true; document.getElementById('aiUse').checked=true;
+      if(mode==='creature'){   // stamp whole creatures into a flock, packed a bit
+        document.getElementById('stampMode').checked=true; texZoom=1.25; document.getElementById('aiZoom').value=1.25;
+      } else { document.getElementById('stampMode').checked=false; texZoom=1; document.getElementById('aiZoom').value=1; }
+      buildProcessedTex(); aiStatusText(); draw();
+      status.textContent='✓ Done! Tweak zoom / gap colour on the right, or Generate again for a new take.';
     });
   }catch(err){
     status.textContent='✗ '+err.message+(/40[13]|verif/i.test(err.message)?'  (gpt-image-1 needs a verified org + credits — check platform.openai.com billing.)':'');
@@ -1701,7 +1719,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION='v1.2 · 2026-06-27';
+const APP_VERSION = 'build 11 (2026-06-28)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
