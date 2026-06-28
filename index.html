@@ -147,8 +147,9 @@
         <span id="advLabel" style="flex:1;text-align:center;font-size:12px;color:var(--muted)">—</span>
         <button class="act" id="advNext" style="width:auto;margin:0;padding:7px 12px">▶</button>
       </div>
-      <button class="act" id="advVary">🎲 Vary shape</button>
-      <button class="act" id="advReset">Reset shape params</button>
+      <button class="act" id="advVary">🎲 Vary corners</button>
+      <button class="act" id="advVaryEdges">🎲 Vary edges (deform)</button>
+      <button class="act" id="advReset">Reset to polygon</button>
       <button class="act" id="btnSimple">← Back to simple patterns</button>
     </div>
   </div>
@@ -567,18 +568,63 @@ const edgeDisplayPts=i=>edgeDisplayPtsOf(pat, edgePts, i);
 let engine='simple';                 // 'simple' (6 hand-coded) | 'advanced' (tactile)
 let advT=null, advTypeIndex=0, advParams=null, advCp={x:0,y:0}, advScale=1, advProto=[];
 let advColors=[];                    // tactile 3-colouring, filled by advInstances()
+let advEdges=[];                     // per edge-shape: interior control pts {x:t, y:offset} in edge-local space
+let advEdgeE={};                     // per edge-shape: edge-local -> world affine frame (for handles)
 const tConv=t=>[t[0],t[3],t[1],t[4],t[2],t[5]];   // tactile row-major -> our [a,b,c,d,e,f]
+const tApply=(t,p)=>({x:t[0]*p.x+t[1]*p.y+t[2], y:t[3]*p.x+t[4]*p.y+t[5]}); // tactile matrix * point
+// one edge's smoothed curve in edge-local space (0,0)->(1,0)
+function advEdgeLocal(id){
+  const interior=advEdges[id]||[];
+  const raw=[{x:0,y:0}, ...interior, {x:1,y:0}];
+  return smoothFull(raw, curvature, curvature>0?10:1);
+}
 function advBuild(){
   const tt=TACT.tilingTypes[advTypeIndex];
   advT=new TACT.IsohedralTiling(tt);
   if(advParams && advParams.length===advT.numParameters()) advT.setParameters(advParams);
   else advParams=advT.getParameters();
-  advProto=[]; for(const part of advT.shape()) advProto.push(TACT.mul(part.T,{x:0,y:0}));
-  let cx=0,cy=0; for(const p of advProto){cx+=p.x;cy+=p.y;} cx/=advProto.length; cy/=advProto.length;
+  const nes=advT.numEdgeShapes();
+  if(!advEdges || advEdges.length!==nes) advEdges=Array.from({length:nes},()=>[]);  // straight by default
+  // recenter/scale from the polygon VERTICES (stable while deforming edges)
+  const verts=[]; for(const part of advT.shape()) verts.push(tApply(part.T,{x:0,y:0}));
+  let cx=0,cy=0; for(const p of verts){cx+=p.x;cy+=p.y;} cx/=verts.length; cy/=verts.length;
   advCp={x:cx,y:cy};
   let xs=1e9,ys=1e9,xe=-1e9,ye=-1e9;
-  for(const p of advProto){xs=Math.min(xs,p.x);ys=Math.min(ys,p.y);xe=Math.max(xe,p.x);ye=Math.max(ye,p.y);}
+  for(const p of verts){xs=Math.min(xs,p.x);ys=Math.min(ys,p.y);xe=Math.max(xe,p.x);ye=Math.max(ye,p.y);}
   advScale=1/Math.max(xe-xs,ye-ys,1e-3);
+  // prototile boundary: walk parts() (handles U/S symmetry), curve each edge
+  advProto=[];
+  for(const part of advT.parts()){
+    let loc=advEdgeLocal(part.id);
+    if(part.rev) loc=loc.slice().reverse();
+    for(let k=1;k<loc.length;k++) advProto.push(tApply(part.T, loc[k]));  // skip first (shared vertex)
+  }
+  // per edge-shape: the affine frame mapping edge-local (0,0)-(1,0) -> tile-world (our matrix)
+  advEdgeE={}; const N=[advScale,0,0,advScale,-advScale*advCp.x,-advScale*advCp.y]; const seen={};
+  for(const part of advT.parts()){ if(seen[part.id]!==undefined) continue; seen[part.id]=1;
+    advEdgeE[part.id]=M.mul(N, tConv(part.T)); }
+}
+// draggable handles for advanced edges (one representative edge per edge-shape)
+function advGetHandles(){
+  const hs=[];
+  for(const id in advEdgeE){ const E=advEdgeE[id];
+    (advEdges[id]||[]).forEach((p,idx)=>hs.push({id:+id, idx, disp:M.apply(E,p)})); }
+  return hs;
+}
+// randomize edge curves (with a self-intersection guard)
+function advVaryEdges(){
+  const nes=advT.numEdgeShapes();
+  for(let tries=0;tries<24;tries++){
+    const cand=[];
+    for(let i=0;i<nes;i++){
+      const k=1+Math.floor(Math.random()*2), pts=[];
+      for(let q=0;q<k;q++) pts.push({x:(q+1)/(k+1), y:rnd(-0.17,0.17)});
+      cand.push(pts);
+    }
+    advEdges=cand; advBuild();
+    if(simple(advOutline())) return;
+  }
+  advEdges=Array.from({length:nes},()=>[]); advBuild();  // fallback: straight
 }
 function advOutline(){ return advProto.map(p=>({x:(p.x-advCp.x)*advScale, y:(p.y-advCp.y)*advScale})); }
 function advInstances(W,H){
@@ -754,10 +800,19 @@ function draw(){
     ctx.restore();
   }
 
-  // editing handles on the base tile (simple engine only for now)
+  // editing handles on the base tile
   if(tool==='shape' && engine==='simple' && document.getElementById('showHandles').checked){
     drawHandles(S);
-  } else if(tool==='draw' || tool==='erase' || (tool==='shape' && engine==='advanced')){
+  } else if(tool==='shape' && engine==='advanced'){
+    drawDrawTarget(S);
+    if(document.getElementById('showHandles').checked){          // draggable edge handles
+      ctx.save();
+      for(const h of advGetHandles()){ const p=M.apply(S,h.disp);
+        ctx.beginPath(); ctx.arc(p.x,p.y,6,0,7); ctx.fillStyle='#fff'; ctx.fill();
+        ctx.lineWidth=2; ctx.strokeStyle='#1c1f26'; ctx.stroke(); }
+      ctx.restore();
+    }
+  } else if(tool==='draw' || tool==='erase'){
     drawDrawTarget(S);   // show the base tile
   }
 }
@@ -865,11 +920,17 @@ function addPointToEdge(i, lp){ // route a click on ANY edge to its controlling 
   }
 }
 
-let drag=null, curStroke=null, panStart=null;
+let drag=null, curStroke=null, panStart=null, advDrag=null;
+function nearestAdvHandle(sp,r2){ let best=null;
+  for(const h of advGetHandles()){ const d=dist2(screenOf(h.disp),sp); if(d<r2 && (!best||d<best.d)) best={h,d}; }
+  return best && best.h;
+}
 
 cv.addEventListener('contextmenu',e=>{
-  if(tool!=='shape'||engine!=='simple'){e.preventDefault();return;}
+  if(tool!=='shape'){e.preventDefault();return;}
   e.preventDefault();
+  if(engine==='advanced'){ const h=nearestAdvHandle(mouse(e),15*15);
+    if(h){ pushUndo(); advEdges[h.id].splice(h.idx,1); advBuild(); draw(); } return; }
   const h=nearestHandle(mouse(e), 14*14);
   if(h && edgePts[h.owner].length>0){ pushUndo(); edgePts[h.owner].splice(h.idx,1); draw(); }
 });
@@ -878,7 +939,7 @@ cv.addEventListener('mousedown',e=>{
   const sp=mouse(e); const lp=toLocal(sp);
   if(tool==='pan'){ panStart={x:e.clientX-pan.x, y:e.clientY-pan.y}; return; }
   if(tool==='shape'){
-    if(engine!=='simple') return;
+    if(engine==='advanced'){ const h=nearestAdvHandle(sp,14*14); if(h){ pushUndo(); advDrag=h; } return; }
     const h=nearestHandle(sp, 13*13);
     if(h){ pushUndo(); drag=h; }
     return;
@@ -889,6 +950,8 @@ cv.addEventListener('mousedown',e=>{
 window.addEventListener('mousemove',e=>{
   if(panStart){ pan.x=e.clientX-panStart.x; pan.y=e.clientY-panStart.y; draw(); return; }
   const sp=mouse(e); const lp=toLocal(sp);
+  if(advDrag){ const el=M.apply(M.inv(advEdgeE[advDrag.id]), lp);
+    advEdges[advDrag.id][advDrag.idx]={x:Math.max(0.06,Math.min(0.94,el.x)), y:el.y}; advBuild(); draw(); return; }
   if(drag){ edgePts[drag.owner][drag.idx]=drag.toStore(lp); draw(); return; }
   if(curStroke){ curStroke.pts.push(lp);
     if(curStroke.pts.length>1){ strokes.push(curStroke); draw(); strokes.pop(); }
@@ -896,13 +959,24 @@ window.addEventListener('mousemove',e=>{
   if(tool==='erase' && e.buttons){ eraseAt(lp); }
 });
 window.addEventListener('mouseup',()=>{
+  if(advDrag){ advEdges[advDrag.id].sort((a,b)=>a.x-b.x); advBuild(); advDrag=null; draw(); }
   if(drag){ sortOwner(drag.owner); drag=null; draw(); }
   if(curStroke){ if(curStroke.pts.length>1) strokes.push(curStroke); curStroke=null; draw(); }
   panStart=null;
 });
 cv.addEventListener('dblclick',e=>{
-  if(tool!=='shape'||engine!=='simple') return;
+  if(tool!=='shape') return;
   const sp=mouse(e);
+  if(engine==='advanced'){   // add a control point to the nearest edge
+    let best=null;
+    for(const id in advEdgeE){ const E=advEdgeE[id];
+      for(let t=0;t<=1.0001;t+=0.05){ const d=dist2(screenOf(M.apply(E,{x:t,y:0})), sp); if(!best||d<best.d) best={id:+id,t,d}; } }
+    if(best && best.d < 16*16){ const el=M.apply(M.inv(advEdgeE[best.id]), toLocal(sp));
+      pushUndo(); (advEdges[best.id]=advEdges[best.id]||[]).push({x:Math.max(0.06,Math.min(0.94,best.t)), y:el.y});
+      advEdges[best.id].sort((a,b)=>a.x-b.x); advBuild(); draw(); }
+    return;
+  }
+  if(engine!=='simple') return;
   let best=null;
   for(let i=0;i<pat.n;i++){
     const d=edgeScreenDist2(i, sp);
@@ -992,6 +1066,8 @@ function snapshot(includeImage){
   const o={type:pat.type, edgePts, strokes, curvature, useTexture, texFrame, texZoom, texOffX, texOffY,
     gapColor:gapColorVal(), blendWhite:document.getElementById('blendWhite').checked, blendAmt:val('blendAmt'),
     stampMode:document.getElementById('stampMode').checked,
+    engine, advTypeIndex, advParams:advParams?advParams.slice():null,
+    advEdges:advEdges?advEdges.map(a=>a?a.map(p=>({x:p.x,y:p.y})):[]):[],
     colors:{A:val('colA'),B:val('colB'),out:val('colOutline'),pen:val('colPen')}};
   if(includeImage && texImageURL) o.texImageURL=texImageURL;
   return JSON.stringify(o);
@@ -1030,6 +1106,20 @@ function loadState(s){
   document.getElementById('stampMode').checked=!!s.stampMode;
   texImage = null; texImageURL = null; texProcessed = null;
   if(s.texImageURL){ loadTexFromURL(s.texImageURL, ()=>{ buildProcessedTex(); draw(); }); }
+  // engine state (advanced tactile tiles)
+  if(s.engine==='advanced'){
+    engine='advanced';
+    advTypeIndex=s.advTypeIndex||0;
+    advParams=s.advParams?s.advParams.slice():null;
+    advEdges=s.advEdges?s.advEdges.map(a=>a?a.map(p=>({x:p.x,y:p.y})):[]):[];
+    advBuild(); advUI();
+    document.getElementById('advCtl').style.display='';
+    document.getElementById('btnAdvanced').style.display='none';
+  } else {
+    engine='simple';
+    document.getElementById('advCtl').style.display='none';
+    document.getElementById('btnAdvanced').style.display='';
+  }
   draw();
 }
 
@@ -1037,19 +1127,10 @@ function loadState(s){
    Undo / redo  (Cmd/Ctrl-Z, Cmd/Ctrl-Shift-Z)
    ============================================================ */
 let undoStack=[], redoStack=[], restoringState=false;
-function captureState(){
-  return { snap:snapshot(true), engine, advTypeIndex, advParams: advParams?advParams.slice():null };
-}
-function restoreState(st){
+function captureState(){ return snapshot(true); }   // full state incl engine/advanced/image
+function restoreState(snap){
   restoringState=true;
-  loadState(JSON.parse(st.snap));     // restores pattern, edges, strokes, texture, colors…
-  if(st.engine==='advanced'){
-    engine='advanced'; advTypeIndex=st.advTypeIndex; advParams=st.advParams?st.advParams.slice():null;
-    advBuild(); advUI();
-    document.getElementById('advCtl').style.display='';
-    document.getElementById('btnAdvanced').style.display='none';
-    draw();
-  }
+  loadState(JSON.parse(snap));        // engine-aware: restores simple or advanced fully
   restoringState=false;
 }
 function pushUndo(){                   // call BEFORE a state-changing user action
@@ -1452,14 +1533,14 @@ function advUI(){
   document.getElementById('advLabel').textContent=(advTypeIndex+1)+' / 81 · IH'+TACT.tilingTypes[advTypeIndex];
   document.getElementById('patPill').innerHTML='<b>Advanced</b> · IH'+TACT.tilingTypes[advTypeIndex]+' (isohedral)';
 }
-function advGo(i){ advTypeIndex=((i%81)+81)%81; advParams=null; advBuild(); advUI(); draw(); }
+function advGo(i){ advTypeIndex=((i%81)+81)%81; advParams=null; advEdges=[]; advBuild(); advUI(); draw(); }
 document.getElementById('btnAdvanced').addEventListener('click',()=>{
   pushUndo();
   engine='advanced';
   document.querySelectorAll('.pat').forEach(e=>e.classList.remove('on'));
   document.getElementById('advCtl').style.display='';
   document.getElementById('btnAdvanced').style.display='none';
-  advParams=null; advBuild(); advUI(); draw();
+  advParams=null; advEdges=[]; advBuild(); advUI(); draw();
 });
 document.getElementById('btnSimple').addEventListener('click',()=>{pushUndo();setPattern(pat?pat.type:'sqT');});
 document.getElementById('advPrev').addEventListener('click',()=>{pushUndo();advGo(advTypeIndex-1);});
@@ -1469,7 +1550,8 @@ document.getElementById('advVary').addEventListener('click',()=>{
   const def=new TACT.IsohedralTiling(TACT.tilingTypes[advTypeIndex]).getParameters();
   advParams=def.map(p=>p+rnd(-0.13,0.13)); advBuild(); draw();
 });
-document.getElementById('advReset').addEventListener('click',()=>{ pushUndo(); advParams=null; advBuild(); draw(); });
+document.getElementById('advVaryEdges').addEventListener('click',()=>{ pushUndo(); advVaryEdges(); draw(); });
+document.getElementById('advReset').addEventListener('click',()=>{ pushUndo(); advParams=null; advEdges=[]; advBuild(); draw(); });
 
 /* ---- "Inspired by Escher" method presets (symmetry only, no artwork) ---- */
 // Escher's creature tilings use only the 7 reflection-free wallpaper groups
