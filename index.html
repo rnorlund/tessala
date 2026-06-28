@@ -961,9 +961,14 @@ function segDist2(p,a,b){
   let t = l2? ((p.x-a.x)*dx+(p.y-a.y)*dy)/l2 : 0; t=Math.max(0,Math.min(1,t));
   const ex=p.x-(a.x+t*dx), ey=p.y-(a.y+t*dy); return ex*ex+ey*ey;
 }
-function edgeScreenDist2(i, sp){ // min px-dist from sp to edge i's drawn curve
-  const pts=edgeDisplayPts(i).map(screenOf); let best=Infinity;
+function edgeScreenDist2(i, sp){ // min px-dist from sp to edge i's drawn (smoothed) curve
+  const pts=edgeCurveFull(pat, edgePts, i).map(screenOf); let best=Infinity;   // the curve you SEE, not the control polygon
   for(let k=0;k<pts.length-1;k++) best=Math.min(best, segDist2(sp,pts[k],pts[k+1]));
+  return best;
+}
+// nearest edge to a screen point + its distance² (px²)
+function nearestEdge(sp){ let best=null;
+  for(let i=0;i<pat.n;i++){ const d=edgeScreenDist2(i,sp); if(!best||d<best.d) best={i,d}; }
   return best;
 }
 function nearestHandle(sp, r2){ // closest draggable handle within r2 (px^2)
@@ -1009,7 +1014,11 @@ cv.addEventListener('mousedown',e=>{
   if(tool==='shape'){
     if(engine==='advanced'){ const h=nearestAdvHandle(sp,14*14); if(h){ pushUndo(); advDrag=h; } return; }
     const h=nearestHandle(sp, 13*13);
-    if(h){ pushUndo(); drag=h; }
+    if(h){ pushUndo(); drag=h; return; }
+    // not on a handle: clicking the dotted edge ADDS a point there and lets you pull it right away
+    const e2=nearestEdge(sp);
+    if(e2 && e2.d < 20*20){ pushUndo(); addPointToEdge(e2.i, toLocal(sp)); draw();
+      drag=nearestHandle(sp, 26*26); }   // grab the just-added point so it tracks the drag
     return;
   }
   if(tool==='draw'){ pushUndo(); curStroke={color:val('colPen'), w:parseFloat(val('penW')), pts:[lp]}; return; }
@@ -1044,13 +1053,7 @@ cv.addEventListener('dblclick',e=>{
       advEdges[best.id].sort((a,b)=>a.x-b.x); advBuild(); draw(); }
     return;
   }
-  if(engine!=='simple') return;
-  let best=null;
-  for(let i=0;i<pat.n;i++){
-    const d=edgeScreenDist2(i, sp);
-    if(!best||d<best.d) best={i,d};
-  }
-  if(best && best.d < 18*18){ pushUndo(); addPointToEdge(best.i, toLocal(sp)); draw(); }
+  // simple engine: a single click on the dotted edge already adds a point (see mousedown)
 });
 cv.addEventListener('wheel',e=>{
   e.preventDefault();
@@ -1944,7 +1947,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 18 (2026-06-28)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 19 (2026-06-28)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
