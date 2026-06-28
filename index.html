@@ -176,9 +176,9 @@
   </div>
 
   <div class="group">
-    <div class="lbl">Inspired by Escher (method)</div>
+    <div class="lbl">Starter tessellations</div>
     <div class="pat-grid" id="inspGrid" style="grid-template-columns:1fr 1fr"></div>
-    <div class="hint" style="margin-top:8px">Escher's creatures use only <b>7 of the 17</b> wallpaper groups — the <b>mirror-free</b> ones (a mirror forces a straight edge; animals have none). These jump to that symmetry; deform &amp; fill to make your own. <i>(p6 “Butterflies” &amp; pgg live in the Advanced engine.)</i></div>
+    <div class="hint" style="margin-top:8px">The top tiles (<b>Lizards, Birds, Doves, Songbirds</b>) load a ready-made <b>interlocking creature</b> you can edit — drag points, change curve, or AI-fill it. The rest jump to a symmetry to build your own. Original shapes made with Escher's <b>method</b> (the 7 mirror-free wallpaper groups), not copies of his drawings. <i>(p6/pgg live in the Advanced engine.)</i></div>
   </div>
 
   <div class="group">
@@ -299,6 +299,8 @@
         <div class="aiNum">3 · Bring it back</div>
         <div class="aiHint">Upload the image the AI made. It’ll fill every tile, clipped to fit.</div>
         <button class="act primary" id="aiImport">⬆ Import AI image</button>
+        <button class="act" id="aiFitShape" title="Reshape the tile to the imported creature's silhouette and warp it to fill — true interlock (needs a transparent background)">🧩 Fit tile to image (interlock)</button>
+        <div class="aiHint">Reshapes the tile to the creature's outline → editable interlocking tile. Needs a <b>transparent background</b>.</div>
         <label class="chk" style="margin-top:10px"><input type="checkbox" id="aiUse"> Use AI image as fill</label>
         <div class="aiHint" style="margin-top:10px">Fit the picture into the tile (fills gaps):</div>
         <div class="row"><label>zoom</label><input type="range" id="aiZoom" min="0.5" max="2.6" step="0.02" value="1"></div>
@@ -1855,6 +1857,21 @@ document.getElementById('aiCopy').addEventListener('click',()=>{
 document.getElementById('aiDownload').addEventListener('click',()=>{
   const a=document.createElement('a'); a.download='tile-shape.png'; a.href=buildShapePNG(); a.click();
 });
+document.getElementById('aiFitShape').addEventListener('click',()=>{
+  const st=document.getElementById('aiStatus');
+  if(engine!=='simple'){ st.textContent='Switch to a simple pattern (Square/Hex/2·3·4-fold/Glide) to fit a tile.'; return; }
+  if(!texImage){ st.textContent='Import a transparent-background creature image first.'; return; }
+  pushUndo();
+  const warped=escherWarp(texImage);     // reshapes the tile + warps the creature to fill it
+  if(!warped){ st.textContent='Could not read a silhouette — the image needs a transparent background.'; return; }
+  loadTexFromURL(warped, ()=>{
+    useTexture=true; document.getElementById('aiUse').checked=true;
+    document.getElementById('stampMode').checked=false; texZoom=1; texOffX=0; texOffY=0;
+    const z=document.getElementById('aiZoom'); if(z) z.value=1;
+    buildProcessedTex(); aiStatusText(); draw();
+    st.textContent='Tile fitted to the creature ✓ — interlocking. Switch to Shape tool to fine-tune.';
+  });
+});
 document.getElementById('aiImport').addEventListener('click',()=>{
   const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
   inp.onchange=()=>{const f=inp.files[0]; if(!f)return; pushUndo(); const r=new FileReader();
@@ -1910,18 +1927,39 @@ document.getElementById('advReset').addEventListener('click',()=>{ pushUndo(); a
 // Escher's creature tilings use only the 7 reflection-free wallpaper groups
 // (p1, p2, p3, p4, p6, pg, pgg) — mirrors would force straight edges. These map
 // the symmetry behind famous works; p6/pgg live in the Advanced engine.
-const INSPIRE=[
-  {n:'Horsemen',   s:'glide · pg',        t:'glide', tpl:'Wave'},
-  {n:'Pegasus',    s:'translation · p1',  t:'sqT',   tpl:'Bird'},
-  {n:'Lizards',    s:'3-fold · p3',       t:'rot3',  tpl:'Claw'},
-  {n:'Fish #20',   s:'4-fold · p4',       t:'rot4',  tpl:'Fish'},
-  {n:'Whirl fish', s:'2-fold · p2',       t:'rot2',  tpl:'Fish'},
-  {n:'Honeycomb',  s:'hex · p1',          t:'hexT',  tpl:'Jigsaw'},
-  {n:'Butterflies',s:'6-fold · p6',       adv:19},   // IH21 (Advanced engine)
-  {n:'Swans',      s:'glide² · pgg',      adv:4},    // IH5  (Advanced engine)
+// Ready-made interlocking CREATURE tiles (original art, made with Escher's own
+// symmetry method via the app's Escherization fit). Click to load an editable
+// tile — then drag points or AI-fill it. ep = per-edge control points (masters;
+// slaves null and auto-derive). NOT copies of Escher's copyrighted drawings.
+const CREATURES=[{"n":"Lizards","s":"3-fold · p3","t":"rot3","cv":0.95,"a":"#e8732a","b":"#2f7d6e","ep":[[{"x":-0.2727,"y":-0.3825},{"x":-0.5453,"y":-0.3825},{"x":-0.5739,"y":-0.1385},{"x":-0.5739,"y":0.1341},{"x":-0.5739,"y":0.4067},{"x":-0.5739,"y":0.6793},{"x":-0.5739,"y":0.5785},{"x":-0.5739,"y":0.3059},{"x":-0.5739,"y":0.0333},{"x":-0.5739,"y":-0.2393},{"x":-0.4427,"y":-0.3825},{"x":-0.1701,"y":-0.3825},{"x":0.1025,"y":-0.3825},{"x":0.3751,"y":-0.3825}],null,[{"x":0.5747,"y":0.564},{"x":0.5747,"y":0.7135},{"x":0.5747,"y":0.4636},{"x":0.5747,"y":0.2138},{"x":0.5747,"y":-0.036},{"x":0.5747,"y":-0.2859},{"x":0.4205,"y":-0.3825},{"x":0.1707,"y":-0.3825},{"x":-0.0791,"y":-0.3825},{"x":-0.329,"y":-0.3825},{"x":-0.5739,"y":-0.3776},{"x":-0.5739,"y":-0.1277},{"x":-0.5739,"y":0.1221},{"x":-0.5739,"y":0.3719}],null,[{"x":-0.5739,"y":0.2666},{"x":-0.5739,"y":0.2252},{"x":-0.5739,"y":0.1838},{"x":-0.5739,"y":0.1423},{"x":-0.5739,"y":0.1009},{"x":-0.5739,"y":0.0594},{"x":-0.5739,"y":0.018},{"x":-0.5739,"y":-0.0235},{"x":-0.5739,"y":-0.0649},{"x":-0.5739,"y":-0.1064},{"x":-0.5739,"y":-0.1478},{"x":-0.5739,"y":-0.1892},{"x":-0.5739,"y":-0.2307},{"x":-0.5739,"y":-0.2721}],null]},{"n":"Birds","s":"glide · pg","t":"glide","cv":0.9,"a":"#e0a93b","b":"#3a6ea5","ep":[[{"x":-0.4119,"y":-0.4198},{"x":-0.3169,"y":-0.3561},{"x":-0.2361,"y":-0.3765},{"x":-0.1832,"y":-0.4781},{"x":-0.1225,"y":-0.5751},{"x":-0.0566,"y":-0.6653},{"x":-0.0254,"y":-0.7754},{"x":0.0205,"y":-0.7679},{"x":0.0513,"y":-0.6577},{"x":0.12,"y":-0.5689},{"x":0.1799,"y":-0.4714},{"x":0.233,"y":-0.37},{"x":0.3146,"y":-0.3596},{"x":0.4096,"y":-0.4232}],[{"x":0.6173,"y":-0.6273},{"x":0.7178,"y":-0.6896},{"x":0.7483,"y":-0.5147},{"x":0.772,"y":-0.3389},{"x":0.7901,"y":-0.1625},{"x":0.8452,"y":0.0045},{"x":0.7177,"y":0.0764},{"x":0.545,"y":0.1156},{"x":0.3749,"y":0.1655},{"x":0.3313,"y":0.2419},{"x":0.5042,"y":0.2773},{"x":0.6818,"y":0.2774},{"x":0.7971,"y":0.3291},{"x":0.6839,"y":0.4642}],null,null]},{"n":"Doves","s":"translation · p1","t":"sqT","cv":0.9,"a":"#e0a93b","b":"#2f6f8f","ep":[[{"x":-0.4119,"y":-0.4198},{"x":-0.3169,"y":-0.3561},{"x":-0.2361,"y":-0.3765},{"x":-0.1832,"y":-0.4781},{"x":-0.1225,"y":-0.5751},{"x":-0.0566,"y":-0.6653},{"x":-0.0254,"y":-0.7754},{"x":0.0205,"y":-0.7679},{"x":0.0513,"y":-0.6577},{"x":0.12,"y":-0.5689},{"x":0.1799,"y":-0.4714},{"x":0.233,"y":-0.37},{"x":0.3146,"y":-0.3596},{"x":0.4096,"y":-0.4232}],[{"x":0.6173,"y":-0.6273},{"x":0.7178,"y":-0.6896},{"x":0.7483,"y":-0.5147},{"x":0.772,"y":-0.3389},{"x":0.7901,"y":-0.1625},{"x":0.8452,"y":0.0045},{"x":0.7177,"y":0.0764},{"x":0.545,"y":0.1156},{"x":0.3749,"y":0.1655},{"x":0.3313,"y":0.2419},{"x":0.5042,"y":0.2773},{"x":0.6818,"y":0.2774},{"x":0.7971,"y":0.3291},{"x":0.6839,"y":0.4642}],null,null]},{"n":"Songbirds","s":"glide · pg","t":"glide","cv":0.9,"a":"#d98a3d","b":"#41707f","ep":[[{"x":-0.6037,"y":-0.7796},{"x":-0.4842,"y":-0.7802},{"x":-0.4121,"y":-0.6439},{"x":-0.3277,"y":-0.7966},{"x":-0.252,"y":-0.6868},{"x":-0.2551,"y":-0.5102},{"x":-0.149,"y":-0.49},{"x":-0.1021,"y":-0.6596},{"x":0.001,"y":-0.8019},{"x":0.1566,"y":-0.8813},{"x":0.3315,"y":-0.8779},{"x":0.4809,"y":-0.7876},{"x":0.6142,"y":-0.6961},{"x":0.6856,"y":-0.6126}],[{"x":0.6375,"y":-0.4228},{"x":0.7193,"y":-0.3338},{"x":0.7592,"y":-0.2201},{"x":0.7556,"y":-0.0993},{"x":0.7187,"y":0.0162},{"x":0.6598,"y":0.1224},{"x":0.5823,"y":0.2157},{"x":0.4898,"y":0.2944},{"x":0.3843,"y":0.3544},{"x":0.4257,"y":0.4328},{"x":0.5376,"y":0.4375},{"x":0.6586,"y":0.4357},{"x":0.7429,"y":0.5069},{"x":0.6385,"y":0.4894}],null,null]}];
+// abstract-template & advanced starters for the patterns without a baked creature
+const INSPIRE_EXTRA=[
+  {n:'Fish #20',   s:'4-fold · p4',  t:'rot4', tpl:'Fish'},
+  {n:'Whirl',      s:'2-fold · p2',  t:'rot2', tpl:'Fish'},
+  {n:'Honeycomb',  s:'hex · p1',     t:'hexT', tpl:'Jigsaw'},
+  {n:'Butterflies',s:'6-fold · p6',  adv:19},   // IH21 (Advanced engine)
+  {n:'Swans',      s:'glide² · pgg',  adv:4},    // IH5  (Advanced engine)
 ];
+function applyCreature(c){
+  pushUndo(); setPattern(c.t);
+  edgePts=c.ep.map(e=>e?e.map(q=>({x:q.x,y:q.y})):null);     // load the creature outline
+  curvature=c.cv;
+  const cm=document.getElementById('curveMain'); if(cm) cm.value=c.cv;
+  const gc=document.getElementById('genCurve'); if(gc) gc.value=c.cv;
+  document.getElementById('colA').value=c.a; document.getElementById('colB').value=c.b;
+  document.getElementById('twoTone').checked=true;
+  useTexture=false; texImage=null; texProcessed=null; document.getElementById('aiUse').checked=false;
+  draw();
+}
 (function(){const ig=document.getElementById('inspGrid');
-  INSPIRE.forEach(p=>{
+  CREATURES.forEach(c=>{
+    const el=document.createElement('div'); el.className='pat';
+    el.innerHTML='<div class="nm">'+c.n+'</div><div class="gp">'+c.s+'</div>';
+    el.title='Load an editable interlocking '+c.n.toLowerCase()+' — then drag points, change curve, or AI-fill it';
+    el.addEventListener('click',()=>applyCreature(c));
+    ig.appendChild(el);
+  });
+  INSPIRE_EXTRA.forEach(p=>{
     const el=document.createElement('div'); el.className='pat';
     el.innerHTML='<div class="nm">'+p.n+'</div><div class="gp">'+p.s+'</div>';
     el.addEventListener('click',()=>{
@@ -1947,7 +1985,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 19 (2026-06-28)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 20 (2026-06-28)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
