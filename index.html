@@ -76,7 +76,7 @@
   /* stage */
   #stage{flex:1; order:2; position:relative; overflow:hidden; background:
     repeating-conic-gradient(#22262e 0% 25%, #1d2128 0% 50%) 50% / 28px 28px;}
-  canvas{display:block; position:absolute; inset:0}
+  #cv{display:block; position:absolute; inset:0}   /* main canvas only — NOT modal/thumbnail canvases */
   #topbar{position:absolute; top:10px; left:10px; right:10px; display:flex; gap:8px;
     align-items:center; pointer-events:none; z-index:5}
   #topbar .pill{pointer-events:auto; background:rgba(30,34,42,.85); border:1px solid var(--line);
@@ -1719,7 +1719,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 11 (2026-06-28)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 12 (2026-06-28)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
