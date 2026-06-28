@@ -1542,6 +1542,25 @@ function defaultPrompt(subject){
 "Bold, flat, high-contrast colours with thick clean black outlines. Transparent everywhere outside the white shape. Keep the same square dimensions — do not crop, rotate, or rescale."
   ].join(" ");
 }
+// Expand a short subject ("a bird") into a rich art-director prompt — this is the hidden
+// step ChatGPT does internally that makes its fills detailed & tight to the shape.
+async function expandPrompt(subject, key){
+  const s=subject && subject.trim() ? subject.trim() : 'a single creature';
+  const sys="You are an expert illustration art-director writing a single image-generation prompt for an M.C. Escher-style tessellation tile. "
+    +"You will be given a creature/subject. Write ONE vivid paragraph (3-5 sentences) describing how to draw that subject as a bold, flat, high-contrast graphic illustration with thick clean black outlines, rich saturated colours, and clear anatomy (head, eye, body, limbs, tail, feather/scale/fur texture). "
+    +"The subject must be posed so its silhouette fills an irregular tile outline — stretch and curl the body, limbs and tail to reach into the corners and lobes of the shape. "
+    +"Forbid any background, scenery, ground, sky, gradient fill or empty coloured space — only the creature itself, everything else transparent. "
+    +"Output ONLY the prompt text, no preamble, no quotes.";
+  try{
+    const r=await fetch('https://api.openai.com/v1/chat/completions',{method:'POST',
+      headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},
+      body:JSON.stringify({model:'gpt-5.5',messages:[{role:'system',content:sys},{role:'user',content:'Subject: '+s}]})});
+    if(!r.ok) return null;
+    const j=await r.json();
+    const t=j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content;
+    return t&&t.trim() ? t.trim() : null;
+  }catch(e){ return null; }
+}
 function aiStatusText(){
   document.getElementById('aiStatus').textContent =
     texImage ? ('Image loaded ✓ — '+(useTexture?'showing in tiling':'hidden')) : 'No image loaded.';
@@ -1570,21 +1589,27 @@ async function autoFill(){
   const quality=document.getElementById('aiQuality').value;
   const mode=document.getElementById('aiMode').value;
   const btn=document.getElementById('aiAutoBtn'); btn.disabled=true;
-  status.textContent='⏳ Generating with gpt-image-1… (10–40s)';
   try{
+    // Step 1: expand the short subject into a rich art-director prompt (what ChatGPT does internally)
+    status.textContent='✍️ Writing a detailed prompt…';
+    const rich = await expandPrompt(subject, key);
     let res;
+    status.textContent='⏳ Drawing with gpt-image-1… (15–45s)';
     if(mode==='outline'){
-      // strict: fill the tile outline (stained-glass look)
+      // fill the tile outline -> true clipped tessellation
       const shapeBlob=await (await fetch(buildShapePNG())).blob();   // locks texFrame for alignment
+      const body = 'The attached image is a tile shape: the WHITE region is the tile, transparent is outside. '
+        + (rich || ('Draw '+subject+'.'))
+        + ' The creature must fill the ENTIRE white silhouette to every edge, bleeding slightly past. Absolutely NO background, scenery, ground or sky inside the shape — any area not covered by the creature must be transparent. Same 1024x1024 dimensions.';
       const fd=new FormData();
       fd.append('model','gpt-image-1'); fd.append('image', shapeBlob, 'shape.png');
-      fd.append('prompt', defaultPrompt(subject));
+      fd.append('prompt', body);
       fd.append('size','1024x1024'); fd.append('quality', quality); fd.append('background','transparent'); fd.append('n','1');
       res=await fetch('https://api.openai.com/v1/images/edits',{method:'POST',headers:{Authorization:'Bearer '+key},body:fd});
     } else {
       // clean free-standing creature (best quality), to be stamped into a flock
-      const prompt='A single stylized '+subject+' with bold, flat, high-contrast colours and clean thick black outlines, '
-        +'centred and filling the frame, on a fully transparent background. No scenery, no text, no shadow.';
+      const prompt=(rich || ('A single stylized '+subject))
+        +' Centred and filling the frame, fully transparent background, no scenery, no text, no shadow.';
       res=await fetch('https://api.openai.com/v1/images/generations',{method:'POST',
         headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},
         body:JSON.stringify({model:'gpt-image-1',prompt,size:'1024x1024',quality,background:'transparent',n:1})});
@@ -1734,7 +1759,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 15 (2026-06-28)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 16 (2026-06-28)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
