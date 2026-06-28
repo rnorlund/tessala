@@ -247,6 +247,8 @@
         <label class="chk" style="margin-top:6px"><input type="checkbox" id="blendWhite"> Blend light areas into gap colour</label>
         <div class="row"><label>light threshold</label><input type="range" id="blendAmt" min="120" max="252" step="4" value="205"></div>
         <label class="chk" style="margin-top:6px"><input type="checkbox" id="stampMode"> Stamp mode — repeat the whole image (don't clip to tile)</label>
+        <button class="act" id="aiCell">⬇ Tile-cell to fill (kill gaps)</button>
+        <div class="aiHint">For a <b>gapless</b> result: download this, ask the AI to fill all the gray with the creature, re-import, and turn Stamp <i>off</i>.</div>
         <button class="act" id="aiRemove">Remove image</button>
         <div class="aiHint" id="aiStatus">No image loaded.</div>
       </div>
@@ -1453,6 +1455,24 @@ function buildShapePNG(){
   texFrame=frame;                                            // lock framing for import
   return off.toDataURL('image/png');
 }
+// one tile cell with the current image clipped inside + gaps in the gap colour:
+// the "fill me" canvas for getting a gapless creature (fill gray -> import -> un-stamp)
+function buildCellPNG(){
+  const outline=buildOutline(), frame=computeTexFrame(outline), RES=TEX_RES;
+  const off=document.createElement('canvas'); off.width=off.height=RES;
+  const c=off.getContext('2d');
+  const map=p=>({x:(p.x-frame.x)/frame.w*RES, y:(p.y-frame.y)/frame.h*RES});
+  const o=outline.map(map);
+  c.save();
+  c.beginPath(); c.moveTo(o[0].x,o[0].y); for(let i=1;i<o.length;i++)c.lineTo(o[i].x,o[i].y); c.closePath(); c.clip();
+  c.fillStyle=gapColorVal(); c.fillRect(0,0,RES,RES);
+  if(texImage) c.drawImage(texProcessed||texImage, 0,0,RES,RES);   // image fills the frame (zoom 1)
+  c.restore();
+  c.beginPath(); c.moveTo(o[0].x,o[0].y); for(let i=1;i<o.length;i++)c.lineTo(o[i].x,o[i].y); c.closePath();
+  c.lineWidth=RES*0.006; c.strokeStyle='#444'; c.stroke();
+  texFrame=frame;
+  return off.toDataURL('image/png');
+}
 function defaultPrompt(subject){
   const s=subject && subject.trim() ? subject.trim() : 'a single animal (e.g. a fish, bird, or lizard)';
   return [
@@ -1522,6 +1542,9 @@ document.getElementById('gapColor').addEventListener('input',()=>{ buildProcesse
 document.getElementById('blendWhite').addEventListener('change',()=>{ buildProcessedTex(); draw(); });
 document.getElementById('blendAmt').addEventListener('input',()=>{ buildProcessedTex(); draw(); });
 document.getElementById('stampMode').addEventListener('change',draw);
+document.getElementById('aiCell').addEventListener('click',()=>{
+  const a=document.createElement('a'); a.download='tile-cell-to-fill.png'; a.href=buildCellPNG(); a.click();
+});
 document.getElementById('aiRemove').addEventListener('click',()=>{
   pushUndo();
   texImage=null; texImageURL=null; useTexture=false;
@@ -1533,14 +1556,16 @@ function advUI(){
   document.getElementById('advLabel').textContent=(advTypeIndex+1)+' / 81 · IH'+TACT.tilingTypes[advTypeIndex];
   document.getElementById('patPill').innerHTML='<b>Advanced</b> · IH'+TACT.tilingTypes[advTypeIndex]+' (isohedral)';
 }
-function advGo(i){ advTypeIndex=((i%81)+81)%81; advParams=null; advEdges=[]; advBuild(); advUI(); draw(); }
-document.getElementById('btnAdvanced').addEventListener('click',()=>{
-  pushUndo();
+function enterAdvanced(index){
   engine='advanced';
   document.querySelectorAll('.pat').forEach(e=>e.classList.remove('on'));
   document.getElementById('advCtl').style.display='';
   document.getElementById('btnAdvanced').style.display='none';
-  advParams=null; advEdges=[]; advBuild(); advUI(); draw();
+  advTypeIndex=index; advParams=null; advEdges=[]; advBuild(); advUI();
+}
+function advGo(i){ advTypeIndex=((i%81)+81)%81; advParams=null; advEdges=[]; advBuild(); advUI(); draw(); }
+document.getElementById('btnAdvanced').addEventListener('click',()=>{
+  pushUndo(); enterAdvanced(advTypeIndex); draw();
 });
 document.getElementById('btnSimple').addEventListener('click',()=>{pushUndo();setPattern(pat?pat.type:'sqT');});
 document.getElementById('advPrev').addEventListener('click',()=>{pushUndo();advGo(advTypeIndex-1);});
@@ -1564,12 +1589,18 @@ const INSPIRE=[
   {n:'Fish #20',   s:'4-fold · p4',       t:'rot4',  tpl:'Fish'},
   {n:'Whirl fish', s:'2-fold · p2',       t:'rot2',  tpl:'Fish'},
   {n:'Honeycomb',  s:'hex · p1',          t:'hexT',  tpl:'Jigsaw'},
+  {n:'Butterflies',s:'6-fold · p6',       adv:19},   // IH21 (Advanced engine)
+  {n:'Swans',      s:'glide² · pgg',      adv:4},    // IH5  (Advanced engine)
 ];
 (function(){const ig=document.getElementById('inspGrid');
   INSPIRE.forEach(p=>{
     const el=document.createElement('div'); el.className='pat';
     el.innerHTML='<div class="nm">'+p.n+'</div><div class="gp">'+p.s+'</div>';
-    el.addEventListener('click',()=>{ pushUndo(); setPattern(p.t); setShape(p.tpl); draw(); });
+    el.addEventListener('click',()=>{
+      pushUndo();
+      if(p.adv!==undefined){ enterAdvanced(p.adv); draw(); }
+      else { setPattern(p.t); setShape(p.tpl); draw(); }
+    });
     ig.appendChild(el);
   });
 })();
