@@ -1609,6 +1609,10 @@ async function autoFill(){
       if(mode==='creature'){   // stamp whole creatures into a flock, packed a bit
         document.getElementById('stampMode').checked=true; texZoom=1.25; document.getElementById('aiZoom').value=1.25;
       } else { document.getElementById('stampMode').checked=false; texZoom=1; document.getElementById('aiZoom').value=1; }
+      // switch to Pan so the edit handles/dashed outline don't clutter the result
+      tool='pan';
+      document.querySelectorAll('.tool').forEach(x=>x.classList.toggle('on', x.dataset.tool==='pan'));
+      cv.style.cursor='grab'; document.getElementById('shapeHelp').style.display='none';
       buildProcessedTex(); aiStatusText(); draw();
       // in-dialog preview so you can judge the result without closing
       const cprev=document.getElementById('aiCreaturePrev'), cx=cprev.getContext('2d');
@@ -1739,7 +1743,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 13 (2026-06-28)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 14 (2026-06-28)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
