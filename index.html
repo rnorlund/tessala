@@ -256,8 +256,8 @@
       </div>
       <div class="aiAutoRow">
         <select id="aiMode" title="how the picture is used">
-          <option value="creature" selected>clean creature → stamp (best, like ChatGPT)</option>
-          <option value="outline">fit to tile outline (stained-glass)</option>
+          <option value="outline" selected>fill the tile shape → true tessellation (recommended)</option>
+          <option value="creature">free creature → stamp (flock / wallpaper)</option>
         </select>
         <select id="aiQuality">
           <option value="low">low · cheapest</option>
@@ -266,7 +266,7 @@
         </select>
         <button class="act primary" id="aiAutoBtn" style="margin:0;white-space:nowrap">⚡ Generate &amp; fill</button>
       </div>
-      <div class="aiHint" id="aiAutoStatus">Uses <b>gpt-image-1</b> (~$0.02–0.17/image). "Clean creature" draws a crisp animal and tiles it as a flock — the nicest results.</div>
+      <div class="aiHint" id="aiAutoStatus">Uses <b>gpt-image-1</b> (~$0.02–0.17/image). <b>"Fill the tile shape"</b> draws a creature conforming to your tile and clips it → a true gap-free tessellation.</div>
       <div id="aiResult" style="display:none">
         <div class="aiResRow">
           <div class="aiResCol"><canvas id="aiCreaturePrev" width="150" height="150" class="prevc"></canvas><div class="aiHint">what the AI drew</div></div>
@@ -1535,21 +1535,12 @@ function buildCellPNG(){
   return off.toDataURL('image/png');
 }
 function defaultPrompt(subject){
-  const s=subject && subject.trim() ? subject.trim() : 'a single animal (e.g. a fish, bird, or lizard)';
+  const s=subject && subject.trim() ? subject.trim() : 'a single creature (bird, fish, or lizard)';
   return [
-"I'm making an Escher-style tessellation. The attached PNG is a tile shape: the WHITE region is the tile, everything transparent is outside it.",
-"",
-"Draw "+s+" that completely fills the white shape.",
-"",
-"Rules:",
-"• Fill the ENTIRE white region and let the drawing bleed slightly PAST every edge — no empty/transparent areas inside the outline. The bumps and lobes of the silhouette are limbs / head / tail, so push the creature into them.",
-"• Do NOT leave any margin or border inside the shape.",
-"• Keep the output the SAME square dimensions as the input — do not crop, rotate, or rescale.",
-"• Outside the shape can be transparent or a flat colour; I'll mask it away.",
-"• Bold, clear, flat, high-contrast art reads best when repeated.",
-"",
-"Return the finished image."
-  ].join("\n");
+"The attached image is a tile shape: the WHITE region is the tile, everything transparent is outside it.",
+"Fill the ENTIRE white silhouette with "+s+". Stretch, bend and arrange it (head, body, limbs, tail) so the creature completely fills and CONFORMS to the white shape — reaching all the way to every edge of the outline and bleeding slightly past. Leave NO empty or transparent areas inside the white region; the bumps and lobes of the silhouette become limbs / head / tail.",
+"Bold, flat, high-contrast colours with thick clean black outlines. Transparent everywhere outside the white shape. Keep the same square dimensions — do not crop, rotate, or rescale."
+  ].join(" ");
 }
 function aiStatusText(){
   document.getElementById('aiStatus').textContent =
@@ -1608,7 +1599,7 @@ async function autoFill(){
       useTexture=true; document.getElementById('aiUse').checked=true;
       if(mode==='creature'){   // stamp whole creatures into a flock, packed a bit
         document.getElementById('stampMode').checked=true; texZoom=1.25; document.getElementById('aiZoom').value=1.25;
-      } else { document.getElementById('stampMode').checked=false; texZoom=1; document.getElementById('aiZoom').value=1; }
+      } else { document.getElementById('stampMode').checked=false; texZoom=1.05; document.getElementById('aiZoom').value=1.05; }
       // switch to Pan so the edit handles/dashed outline don't clutter the result
       tool='pan';
       document.querySelectorAll('.tool').forEach(x=>x.classList.toggle('on', x.dataset.tool==='pan'));
@@ -1743,7 +1734,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 14 (2026-06-28)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 15 (2026-06-28)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
