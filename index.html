@@ -307,6 +307,7 @@
     <div class="pill" id="patPill"><b>—</b></div>
     <div class="pill">scroll = zoom · drag empty space (Pan tool) = move</div>
     <div style="flex:1"></div>
+    <div class="pill" id="verPill" title="App version — check this matches the latest build">v—</div>
     <div class="pill ptog" id="tgRight" title="Show/hide right panel">Style ☰</div>
   </div>
 </main>
@@ -1700,6 +1701,8 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
+const APP_VERSION='v1.2 · 2026-06-27';
+document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
 </script>
