@@ -238,7 +238,10 @@
     <button class="act" id="btnSaveColl">★ Save to my collection</button>
     <button class="act" id="btnReset">Reset shape</button>
     <button class="act" id="btnClearDraw">Clear drawing</button>
+    <div class="act" style="display:flex;align-items:center;gap:8px;cursor:default">curve / smoothness
+      <input type="range" id="curveMain" min="0" max="1.6" step="0.05" value="0.6" style="flex:1" title="edge curvature — higher = smoother, rounder shapes"></div>
     <button class="act" id="btnPng">Export PNG</button>
+    <button class="act" id="btnShape" title="Download the tile outline as a transparent PNG to hand to ChatGPT">⬇ Tile shape PNG</button>
     <button class="act" id="btnSave">Save design</button>
     <button class="act" id="btnLoad">Load design</button>
   </div>
@@ -256,7 +259,8 @@
       </div>
       <div class="aiAutoRow">
         <select id="aiMode" title="how the picture is used">
-          <option value="outline" selected>fill the tile shape → true tessellation (recommended)</option>
+          <option value="interlock" selected>true interlock → warp creature to fill the tile (Escher)</option>
+          <option value="outline">fill the tile shape → clip (intact creature, some background)</option>
           <option value="creature">free creature → stamp (flock / wallpaper)</option>
         </select>
         <select id="aiQuality">
@@ -266,7 +270,7 @@
         </select>
         <button class="act primary" id="aiAutoBtn" style="margin:0;white-space:nowrap">⚡ Generate &amp; fill</button>
       </div>
-      <div class="aiHint" id="aiAutoStatus">Uses <b>gpt-image-1</b> (~$0.02–0.17/image). <b>"Fill the tile shape"</b> draws a creature conforming to your tile and clips it → a true gap-free tessellation.</div>
+      <div class="aiHint" id="aiAutoStatus">Uses <b>gpt-image-1</b> (~$0.02–0.17/image). <b>"True interlock"</b> draws a whole creature, reshapes the tile to its silhouette, and warps it to fill — a real gap-free Escher tessellation (nothing cut, no background).</div>
       <div id="aiResult" style="display:none">
         <div class="aiResRow">
           <div class="aiResCol"><canvas id="aiCreaturePrev" width="150" height="150" class="prevc"></canvas><div class="aiHint">what the AI drew</div></div>
@@ -335,7 +339,8 @@
     <span id="genTip">click a tile to ♥ rate it · then Evolve</span>
     <div class="spacer"></div>
     <div class="ctl">size<input type="range" id="genSize" min="120" max="520" step="10" value="180" style="width:90px"></div>
-    <div class="ctl">curve<input type="range" id="genCurve" min="0" max="1" step="0.05" value="0.6" style="width:80px"></div>
+    <div class="ctl">curve<input type="range" id="genCurve" min="0" max="1.6" step="0.05" value="0.6" style="width:80px"></div>
+    <div class="ctl">smooth<input type="range" id="genSteps" min="8" max="36" step="2" value="14" title="curve resolution — higher = smoother" style="width:70px"></div>
     <div class="ctl">wild<input type="range" id="genWild" min="0.08" max="0.55" step="0.01" value="0.32" style="width:70px"></div>
     <div class="ctl">detail<input type="range" id="genDetail" min="2" max="9" step="1" value="5" style="width:60px"></div>
     <div class="ctl">lobe<input type="range" id="genLobe" min="0" max="1" step="0.05" value="0.5" style="width:60px"></div>
@@ -582,7 +587,7 @@ function smoothFull(pts, c, steps){
   out.push({x:pts[n-1].x, y:pts[n-1].y});
   return out;
 }
-const CURVE_STEPS=10;
+let CURVE_STEPS=14;   // curve sampling resolution (higher = smoother); set by the "smooth" slider
 // Sampled polyline for edge i, corner_i .. corner_{i+1} (both ends included).
 // Slave edges are derived by TRANSFORMING the master's sampled curve, and self
 // edges are mirrored through their midpoint, so paired/shared edges are sampled
@@ -639,7 +644,7 @@ const tApply=(t,p)=>({x:t[0]*p.x+t[1]*p.y+t[2], y:t[3]*p.x+t[4]*p.y+t[5]}); // t
 function advEdgeLocal(id){
   const interior=advEdges[id]||[];
   const raw=[{x:0,y:0}, ...interior, {x:1,y:0}];
-  return smoothFull(raw, curvature, curvature>0?10:1);
+  return smoothFull(raw, curvature, curvature>0?CURVE_STEPS:1);
 }
 function advBuild(){
   const tt=TACT.tilingTypes[advTypeIndex];
@@ -1125,6 +1130,16 @@ document.getElementById('btnPng').addEventListener('click',()=>{
   const a=document.createElement('a');
   a.download='tessellation.png'; a.href=cv.toDataURL('image/png'); a.click();
 });
+document.getElementById('btnShape').addEventListener('click',()=>{
+  // transparent PNG, white = the tile region — hand this to ChatGPT to fill the shape
+  const a=document.createElement('a');
+  a.download='tile-shape.png'; a.href=buildShapePNG(); a.click();
+});
+document.getElementById('curveMain').addEventListener('input',e=>{
+  curvature=parseFloat(e.target.value);
+  const gc=document.getElementById('genCurve'); if(gc) gc.value=curvature;
+  draw();
+});
 function snapshot(includeImage){
   const o={type:pat.type, edgePts, strokes, curvature, useTexture, texFrame, texZoom, texOffX, texOffY,
     gapColor:gapColorVal(), blendWhite:document.getElementById('blendWhite').checked, blendAmt:val('blendAmt'),
@@ -1152,7 +1167,8 @@ function loadState(s){
   if(s.edgePts) edgePts=s.edgePts;
   if(s.strokes) strokes=s.strokes;
   if(typeof s.curvature==='number'){ curvature=s.curvature;
-    const cs=document.getElementById('genCurve'); if(cs) cs.value=curvature; }
+    const cs=document.getElementById('genCurve'); if(cs) cs.value=curvature;
+    const cm=document.getElementById('curveMain'); if(cm) cm.value=curvature; }
   if(s.colors){document.getElementById('colA').value=s.colors.A;
     document.getElementById('colB').value=s.colors.B;
     document.getElementById('colOutline').value=s.colors.out;
@@ -1475,8 +1491,13 @@ function applyGridSize(){
 document.getElementById('genSize').addEventListener('input',applyGridSize);
 document.getElementById('genCurve').addEventListener('input',e=>{
   curvature=parseFloat(e.target.value);
+  const mc=document.getElementById('curveMain'); if(mc) mc.value=curvature;
   renderActive();   // update gallery
   draw();           // and the main canvas, so refined tiles match
+});
+document.getElementById('genSteps').addEventListener('input',e=>{
+  CURVE_STEPS=parseInt(e.target.value,10);
+  renderActive(); draw();
 });
 function openGen(){ genPat=buildPattern(pat.type); document.getElementById('genModal').classList.add('show');
   syncGenMini(); updateSavedBtn(); newBatch(); applyGridSize(); }
@@ -1562,6 +1583,150 @@ async function expandPrompt(subject, key){
     return t&&t.trim() ? t.trim() : null;
   }catch(e){ return null; }
 }
+// ============ Escherization: warp a whole creature so its silhouette BECOMES the tile ============
+// True interlock — the creature fills 100% of the tile (no clip, no background, nothing cut).
+// Moore-neighbour boundary trace of the creature's alpha silhouette.
+function alphaContour(img, RES){
+  const c=document.createElement('canvas'); c.width=c.height=RES;
+  const x=c.getContext('2d'); x.clearRect(0,0,RES,RES); x.drawImage(img,0,0,RES,RES);
+  const d=x.getImageData(0,0,RES,RES).data;
+  const op=(i,j)=> i>=0&&j>=0&&i<RES&&j<RES && d[(j*RES+i)*4+3]>50;
+  let start=null;
+  for(let j=0;j<RES&&!start;j++) for(let i=0;i<RES;i++){ if(op(i,j)){ start={x:i,y:j}; break; } }
+  if(!start) return null;
+  const N=[[-1,0],[-1,-1],[0,-1],[1,-1],[1,0],[1,1],[0,1],[-1,1]];   // 8 nbrs, CW from West
+  const contour=[start];
+  let p=start, b={x:start.x-1,y:start.y};   // we entered from the West (scan order)
+  const maxIter=RES*RES*8;
+  for(let it=0; it<maxIter; it++){
+    let bi=0; for(let k=0;k<8;k++) if(p.x+N[k][0]===b.x&&p.y+N[k][1]===b.y){ bi=k; break; }
+    let found=null, prev=b;
+    for(let k=1;k<=8;k++){ const dir=(bi+k)%8, c2={x:p.x+N[dir][0],y:p.y+N[dir][1]};
+      if(op(c2.x,c2.y)){ found=c2; b=prev; break; } prev=c2; }
+    if(!found) break;
+    p=found;
+    if(p.x===start.x && p.y===start.y) break;
+    contour.push(p);
+  }
+  return contour.length>8 ? contour : null;
+}
+// resample a closed polyline to N points, evenly by arc length
+function resampleClosed(pts, N){
+  const m=pts.length, seg=[]; let total=0;
+  for(let i=0;i<m;i++){ const a=pts[i], b=pts[(i+1)%m]; const L=Math.hypot(b.x-a.x,b.y-a.y); seg.push(L); total+=L; }
+  const out=[], step=total/N; let i=0, acc=0;
+  for(let n=0;n<N;n++){ let target=n*step;
+    while(acc+seg[i]<target && i<m-1){ acc+=seg[i]; i++; }
+    const a=pts[i], b=pts[(i+1)%m], t=seg[i]>1e-9?(target-acc)/seg[i]:0;
+    out.push({x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t});
+  }
+  return out;
+}
+function centroidOf(p){ let x=0,y=0; for(const q of p){x+=q.x;y+=q.y;} return {x:x/p.length,y:y/p.length}; }
+// normalise points: centre + scale to unit RMS radius (for shape comparison)
+function normShape(p){ const c=centroidOf(p); let s=0; for(const q of p) s+=(q.x-c.x)**2+(q.y-c.y)**2;
+  s=Math.sqrt(s/p.length)||1; return p.map(q=>({x:(q.x-c.x)/s,y:(q.y-c.y)/s})); }
+// best cyclic alignment of creature loop S to tile loop T (try every shift + both orientations)
+function bestAlign(S, T){
+  const N=T.length, ns=normShape(S), nt=normShape(T);
+  let best={cost:Infinity, shift:0, flip:false};
+  for(const flip of [false,true]){
+    const s=flip? ns.map((_,i)=>ns[(N-i)%N]) : ns;
+    for(let sh=0; sh<N; sh++){
+      let cost=0;
+      for(let i=0;i<N;i++){ const a=s[(i+sh)%N], b=nt[i]; cost+=(a.x-b.x)**2+(a.y-b.y)**2; if(cost>best.cost) break; }
+      if(cost<best.cost) best={cost,shift:sh,flip};
+    }
+  }
+  // return S reordered to correspond index-for-index with T
+  let s=best.flip? S.map((_,i)=>S[(N-i)%N]) : S.slice();
+  return s.map((_,i)=>s[(i+best.shift)%N]);
+}
+// affine [a,b,c,d,e,f] mapping src triangle -> dst triangle
+function affineTri(s,d){
+  const x0=s[0].x,y0=s[0].y,x1=s[1].x,y1=s[1].y,x2=s[2].x,y2=s[2].y;
+  const det=(x1-x0)*(y2-y0)-(x2-x0)*(y1-y0); if(Math.abs(det)<1e-9) return null;
+  const u0=d[0].x,v0=d[0].y,u1=d[1].x,v1=d[1].y,u2=d[2].x,v2=d[2].y;
+  const a=((u1-u0)*(y2-y0)-(u2-u0)*(y1-y0))/det;
+  const c=((u2-u0)*(x1-x0)-(u1-u0)*(x2-x0))/det;
+  const b=((v1-v0)*(y2-y0)-(v2-v0)*(y1-y0))/det;
+  const dd=((v2-v0)*(x1-x0)-(v1-v0)*(x2-x0))/det;
+  return [a,b,c,dd, u0-a*x0-c*y0, v0-b*x0-dd*y0];
+}
+// resample an OPEN polyline arc to K points (endpoints included)
+function resampleOpen(pts,K){
+  if(pts.length<2){ const p=pts[0]||{x:0,y:0}; return Array.from({length:K},()=>({x:p.x,y:p.y})); }
+  const seg=[]; let total=0;
+  for(let i=0;i<pts.length-1;i++){ const L=Math.hypot(pts[i+1].x-pts[i].x,pts[i+1].y-pts[i].y); seg.push(L); total+=L; }
+  const out=[], step=total/(K-1); let i=0,acc=0;
+  for(let n=0;n<K;n++){ let target=n*step;
+    while(i<seg.length-1 && acc+seg[i]<target){ acc+=seg[i]; i++; }
+    const t=seg[i]>1e-9?(target-acc)/seg[i]:0;
+    out.push({x:pts[i].x+(pts[i+1].x-pts[i].x)*t, y:pts[i].y+(pts[i+1].y-pts[i].y)*t}); }
+  return out;
+}
+function arcOf(S,a,b){ const L=S.length, arc=[]; let j=a; for(let g=0;g<=L;g++){ arc.push(S[j]); if(j===b) break; j=(j+1)%L; } return arc; }
+
+// ESCHERIZATION step 1: deform the tile's MASTER edges to trace the creature silhouette.
+// Slaves auto-derive via the group isometry, so the tile still tiles the plane.
+// Returns {Simg: silhouette pts (image px), idx: corner->silhouette index}.
+function escherFit(creatureImg, RES){
+  const cont=alphaContour(creatureImg,RES); if(!cont) return null;
+  let S=resampleClosed(cont, 720);                           // dense silhouette, image px
+  const cen=centroidOf(S);
+  let cr=0; for(const c of pat.corners) cr+=Math.hypot(c.x,c.y); cr/=pat.n;   // tile corner radius
+  let sr=0; for(const q of S) sr+=Math.hypot(q.x-cen.x,q.y-cen.y); sr/=S.length; // creature radius
+  const k=cr/(sr||1);
+  const toLocal=q=>({x:(q.x-cen.x)*k, y:(q.y-cen.y)*k});     // image px -> tile local coords
+  const near=p=>{ let bi=0,bd=Infinity; for(let i=0;i<S.length;i++){ const ql=toLocal(S[i]); const d=(ql.x-p.x)**2+(ql.y-p.y)**2; if(d<bd){bd=d;bi=i;} } return bi; };
+  let idx=pat.corners.map(near);
+  const fwd=ix=>{ let s=0; for(let i=0;i<pat.n;i++) s+=(ix[(i+1)%pat.n]-ix[i]+S.length)%S.length; return s; };
+  if(fwd(idx)>S.length*1.5){ S=S.slice().reverse(); idx=pat.corners.map(near); }   // match winding
+  for(let i=0;i<pat.n;i++){
+    if(pat.role[i]==='slave'){ edgePts[i]=null; continue; } // derived from a master
+    const arc=arcOf(S, idx[i], idx[(i+1)%pat.n]).map(toLocal);
+    if(pat.role[i]==='master'){
+      edgePts[i]=resampleOpen(arc,16).slice(1,-1);          // interior control points (drop corners)
+    } else { // self: edge must be centro-symmetric about its midpoint -> symmetrise the arc
+      const H=9, Mc=mid(pat.corners[i], pat.corners[(i+1)%pat.n]);
+      const ra=resampleOpen(arc, 2*H+1), half=[];
+      for(let k=1;k<=H-1;k++){ const a=ra[k], b=ra[2*H-k];
+        half.push({x:(a.x + 2*Mc.x-b.x)/2, y:(a.y + 2*Mc.y-b.y)/2}); }   // average point with mirror of its partner
+      edgePts[i]=half;
+    }
+  }
+  return {Simg:S, idx};
+}
+// MAIN: fit the tile to the creature, then warp the creature to fill the (now creature-shaped) tile.
+// True interlock: tile tiles by construction, creature fills it 100% (no clip, no background).
+function escherWarp(creatureImg){
+  const RES=1024, K=26;
+  const fit=escherFit(creatureImg, RES); if(!fit) return null;
+  const {Simg, idx}=fit;
+  texFrame=computeTexFrame(buildOutline());                  // frame the fitted tile
+  const S=[], T=[];                                          // matched per-edge correspondence
+  for(let i=0;i<pat.n;i++){
+    const Dloc=edgeCurveFull(pat, edgePts, i);               // tile edge i (local, smoothed)
+    const Du=resampleOpen(Dloc,K).map(p=>({x:((p.x-texFrame.x)/texFrame.w)*RES, y:((p.y-texFrame.y)/texFrame.h)*RES}));
+    const Sa=resampleOpen(arcOf(Simg, idx[i], idx[(i+1)%pat.n]), K);   // creature arc (image px)
+    for(let s=0;s<K-1;s++){ T.push(Du[s]); S.push(Sa[s]); } // drop last; next edge repeats the corner
+  }
+  const cS=centroidOf(S), cT=centroidOf(T), N=S.length;
+  const cv2=document.createElement('canvas'); cv2.width=cv2.height=RES;
+  const g=cv2.getContext('2d'); g.clearRect(0,0,RES,RES); g.imageSmoothingQuality='high';
+  const src=document.createElement('canvas'); src.width=src.height=RES;
+  src.getContext('2d').drawImage(creatureImg,0,0,RES,RES);
+  for(let i=0;i<N;i++){
+    const j=(i+1)%N;
+    const m=affineTri([cS,S[i],S[j]],[cT,T[i],T[j]]); if(!m) continue;
+    g.save();
+    g.beginPath(); g.moveTo(cT.x,cT.y); g.lineTo(T[i].x,T[i].y); g.lineTo(T[j].x,T[j].y); g.closePath(); g.clip();
+    g.setTransform(m[0],m[1],m[2],m[3],m[4],m[5]);
+    g.drawImage(src,0,0);
+    g.setTransform(1,0,0,1,0,0); g.restore();
+  }
+  return cv2.toDataURL('image/png');
+}
 function aiStatusText(){
   document.getElementById('aiStatus').textContent =
     texImage ? ('Image loaded ✓ — '+(useTexture?'showing in tiling':'hidden')) : 'No image loaded.';
@@ -1608,9 +1773,12 @@ async function autoFill(){
       fd.append('size','1024x1024'); fd.append('quality', quality); fd.append('background','transparent'); fd.append('n','1');
       res=await fetch('https://api.openai.com/v1/images/edits',{method:'POST',headers:{Authorization:'Bearer '+key},body:fd});
     } else {
-      // clean free-standing creature (best quality), to be stamped into a flock
+      // clean whole creature on transparent bg (for interlock-warp, or to stamp as a flock)
       const prompt=(rich || ('A single stylized '+subject))
-        +' Centred and filling the frame, fully transparent background, no scenery, no text, no shadow.';
+        +(mode==='interlock'
+            ? ' One whole creature, limbs/wings/tail spread OUT to make a full, compact, rounded silhouette that nearly fills the frame (it will be warped to interlock). '
+            : ' Centred and filling the frame. ')
+        +'Fully transparent background, no scenery, no ground, no text, no shadow — only the creature.';
       res=await fetch('https://api.openai.com/v1/images/generations',{method:'POST',
         headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},
         body:JSON.stringify({model:'gpt-image-1',prompt,size:'1024x1024',quality,background:'transparent',n:1})});
@@ -1621,27 +1789,43 @@ async function autoFill(){
     if(!b64) throw new Error('No image returned.');
     pushUndo();
     const dataURL='data:image/png;base64,'+b64;
-    loadTexFromURL(dataURL, ()=>{
+    // applyResult: set flags, switch to Pan, draw, and show the in-dialog preview.
+    // origImg = what the AI actually drew (for the left "what the AI drew" thumbnail).
+    const applyResult=(origImg)=>{
       useTexture=true; document.getElementById('aiUse').checked=true;
       if(mode==='creature'){   // stamp whole creatures into a flock, packed a bit
         document.getElementById('stampMode').checked=true; texZoom=1.25; document.getElementById('aiZoom').value=1.25;
       } else { document.getElementById('stampMode').checked=false; texZoom=1.00; document.getElementById('aiZoom').value=1.00; }
-      // switch to Pan so the edit handles/dashed outline don't clutter the result
       tool='pan';
       document.querySelectorAll('.tool').forEach(x=>x.classList.toggle('on', x.dataset.tool==='pan'));
       cv.style.cursor='grab'; document.getElementById('shapeHelp').style.display='none';
       buildProcessedTex(); aiStatusText(); draw();
-      // in-dialog preview so you can judge the result without closing
       const cprev=document.getElementById('aiCreaturePrev'), cx=cprev.getContext('2d');
       cx.clearRect(0,0,cprev.width,cprev.height);
-      cx.fillStyle='#cfd6e0'; cx.fillRect(0,0,cprev.width,cprev.height);   // light bg so transparent art shows
-      cx.drawImage(texImage,0,0,cprev.width,cprev.height);
+      cx.fillStyle='#cfd6e0'; cx.fillRect(0,0,cprev.width,cprev.height);
+      cx.drawImage(origImg||texImage,0,0,cprev.width,cprev.height);
       const tprev=document.getElementById('aiTilePrev'), tx=tprev.getContext('2d');
       tx.clearRect(0,0,tprev.width,tprev.height);
-      tx.drawImage(cv,0,0,tprev.width,tprev.height);                        // copy the live tiling
+      tx.drawImage(cv,0,0,tprev.width,tprev.height);
       document.getElementById('aiResult').style.display='';
       status.textContent='✓ Done — preview below. Close to use it, or Generate again.';
-    });
+    };
+    if(mode==='interlock'){
+      // warp the whole creature so its silhouette becomes the tile -> true interlock
+      status.textContent='🧩 Warping the creature to interlock the tile…';
+      await new Promise((resolve,reject)=>{
+        const ci=new Image();
+        ci.onload=()=>{
+          const warped=escherWarp(ci);
+          if(!warped){ reject(new Error('Could not read the creature silhouette — try a simpler / bolder subject.')); return; }
+          loadTexFromURL(warped, ()=>{ applyResult(ci); resolve(); });
+        };
+        ci.onerror=()=>reject(new Error('creature image failed to load'));
+        ci.src=dataURL;
+      });
+    } else {
+      loadTexFromURL(dataURL, ()=>applyResult(texImage));
+    }
   }catch(err){
     status.textContent='✗ '+err.message+(/40[13]|verif/i.test(err.message)?'  (gpt-image-1 needs a verified org + credits — check platform.openai.com billing.)':'');
   }
@@ -1760,7 +1944,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 17 (2026-06-28)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 18 (2026-06-28)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
