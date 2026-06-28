@@ -2,6 +2,8 @@
 
 **Escher-style tessellations, with AI.**
 
+🔗 **Live app: https://rnorlund.github.io/tessala/** — runs entirely in your browser, nothing to install.
+
 Tessala is a single-file web app for designing repeating tilings the way M.C. Escher did — pick a symmetry, warp one tile, and watch it interlock across the plane. Then turn the abstract tile into a picture: draw inside it, or hand the shape to an AI image model and drop the result back in, clipped to fit.
 
 ![Tessala tessellation](docs/hero.png)
