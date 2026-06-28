@@ -116,6 +116,21 @@
   .cand .save.done{background:#3a3a2a; border-color:var(--accent2); color:#ffe9a8}
   #genSavedBtn.on{background:#3a3a2a; border-color:var(--accent2)}
   #genTip{color:var(--muted); font-size:12px; margin-left:4px}
+  /* symmetry / tiling gallery */
+  #symModal{position:fixed; inset:0; z-index:52; display:none; flex-direction:column;
+    background:rgba(8,10,14,.93); padding:16px 18px}
+  #symModal.show{display:flex}
+  #symBody{flex:1; overflow:auto; padding:4px 2px 24px}
+  .symSec{font-size:13px; font-weight:700; color:var(--accent); margin:16px 2px 8px;
+    text-transform:uppercase; letter-spacing:.05em}
+  .symSec span{color:var(--muted); font-weight:400; text-transform:none; letter-spacing:0}
+  #symModal .grid{display:grid; gap:10px; grid-template-columns:repeat(auto-fill,minmax(108px,1fr))}
+  .symCell{background:var(--panel); border:2px solid var(--line); border-radius:9px;
+    padding:5px; cursor:pointer; text-align:center; transition:border-color .1s}
+  .symCell:hover{border-color:var(--accent)}
+  .symCell.on{border-color:var(--accent2)}
+  .symCell canvas{width:100%; height:auto; display:block; border-radius:5px; background:#fff}
+  .symCell .lab{font-size:10px; color:var(--muted); margin-top:3px}
   /* AI workflow modal */
   #aiModal{position:fixed; inset:0; z-index:55; display:none; align-items:center; justify-content:center;
     background:rgba(8,10,14,.9); padding:20px}
@@ -161,7 +176,7 @@
   <div class="group">
     <div class="lbl">1 · Pattern (symmetry)</div>
     <div class="pat-grid" id="patGrid"></div>
-    <button class="act" id="btnAdvanced" style="margin-top:8px">⊞ Advanced: 81 isohedral types</button>
+    <button class="act" id="btnAdvanced" style="margin-top:8px">⊞ All tilings — choose visually (81 types)</button>
     <div id="advCtl" style="display:none; margin-top:8px">
       <div class="row" style="gap:6px">
         <button class="act" id="advPrev" style="width:auto;margin:0;padding:7px 12px">◀</button>
@@ -320,6 +335,16 @@
       <b>Tips for a clean fit:</b> tell the AI to <b>fill the whole shape and bleed past every edge</b> (gaps inside the outline become holes when tiled) · keep the output <b>square / same size</b> · <b>don’t change the shape</b> between export and import (Save the design first if unsure) · in rotation/glide patterns the picture will appear rotated/mirrored across tiles — that’s the Escher effect.
     </div>
   </div>
+</div>
+
+<div id="symModal">
+  <div id="genHead">
+    <h2>Choose a tiling — all 81 isohedral types</h2>
+    <span class="spacer"></span>
+    <span id="genTip">Click any tile to load it · then deform edges, AI-fill, or Escherize. Grouped by rotational symmetry, like the classic builders — but with the full set.</span>
+    <button id="symClose">Close</button>
+  </div>
+  <div id="symBody"></div>
 </div>
 
 <main id="stage">
@@ -1909,9 +1934,66 @@ function enterAdvanced(index){
   advTypeIndex=index; advParams=null; advEdges=[]; advBuild(); advUI();
 }
 function advGo(i){ advTypeIndex=((i%81)+81)%81; advParams=null; advEdges=[]; advBuild(); advUI(); draw(); }
-document.getElementById('btnAdvanced').addEventListener('click',()=>{
-  pushUndo(); enterAdvanced(advTypeIndex); draw();
-});
+// ---- "Choose a tiling" gallery: live thumbnail of every isohedral type ----
+function drawTactileThumb(idx, cvEl){
+  const ctx=cvEl.getContext('2d'), W=cvEl.width, H=cvEl.height;
+  ctx.clearRect(0,0,W,H); ctx.fillStyle='#fff'; ctx.fillRect(0,0,W,H);
+  let t; try{ t=new TACT.IsohedralTiling(TACT.tilingTypes[idx]); }catch(e){ return; }
+  const proto=[]; for(let i=0;i<t.numVertices();i++){ const v=t.getVertex(i); proto.push({x:v.x,y:v.y}); }
+  const R=2.4, tiles=[];
+  for(const tile of t.fillRegionBounds(-R,-R,R,R)){ tiles.push(tile); if(tiles.length>500) break; }
+  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+  for(const tile of tiles) for(const p of proto){ const q=tApply(tile.T,p);
+    x0=Math.min(x0,q.x);y0=Math.min(y0,q.y);x1=Math.max(x1,q.x);y1=Math.max(y1,q.y); }
+  const pad=7, s=Math.min((W-2*pad)/((x1-x0)||1),(H-2*pad)/((y1-y0)||1));
+  const ox=(W-s*(x1-x0))/2 - s*x0, oy=(H-s*(y1-y0))/2 - s*y0;
+  const cols=['#e6a93b','#3a7ab0','#2f9d8e'];
+  for(const tile of tiles){
+    ctx.beginPath();
+    proto.forEach((p,k)=>{ const q=tApply(tile.T,p); const X=ox+s*q.x, Y=oy+s*q.y; k?ctx.lineTo(X,Y):ctx.moveTo(X,Y); });
+    ctx.closePath();
+    ctx.fillStyle=cols[t.getColour(tile.t1,tile.t2,tile.aspect)%3]; ctx.fill();
+    ctx.strokeStyle='rgba(20,24,30,.55)'; ctx.lineWidth=1; ctx.stroke();
+  }
+}
+const NGON={3:'triangle',4:'quad',5:'pentagon',6:'hexagon'};
+let symBuilt=false;
+function buildSymGallery(){
+  if(symBuilt) return; symBuilt=true;
+  const body=document.getElementById('symBody');
+  // group type indices by number of aspects (≈ rotational "way")
+  const groups={};
+  for(let i=0;i<TACT.tilingTypes.length;i++){
+    let na=2; try{ na=new TACT.IsohedralTiling(TACT.tilingTypes[i]).numAspects(); }catch(e){}
+    (groups[na]=groups[na]||[]).push(i);
+  }
+  const order=[1,2,3,4,6].concat(Object.keys(groups).map(Number).filter(n=>![1,2,3,4,6].includes(n)).sort((a,b)=>a-b));
+  const wayName={1:'1-way',2:'2-way',3:'3-way',4:'4-way',6:'6-way'};
+  for(const na of order){
+    if(!groups[na]) continue;
+    const h=document.createElement('div'); h.className='symSec';
+    h.innerHTML=(wayName[na]||na+'-way')+' <span>· '+groups[na].length+' tilings · '+na+' tile orientation'+(na>1?'s':'')+'</span>';
+    body.appendChild(h);
+    const grid=document.createElement('div'); grid.className='grid'; body.appendChild(grid);
+    for(const i of groups[na]){
+      const cell=document.createElement('div'); cell.className='symCell'; cell.dataset.idx=i;
+      const cv2=document.createElement('canvas'); cv2.width=104; cv2.height=104;
+      cell.appendChild(cv2);
+      let nv=4; try{ nv=new TACT.IsohedralTiling(TACT.tilingTypes[i]).numVertices(); }catch(e){}
+      const lab=document.createElement('div'); lab.className='lab';
+      lab.textContent='IH'+TACT.tilingTypes[i]+' · '+(NGON[nv]||nv+'-gon');
+      cell.appendChild(lab);
+      cell.title=(NGON[nv]||nv+'-gon')+', '+(wayName[na]||na+'-way')+' — IH'+TACT.tilingTypes[i];
+      drawTactileThumb(i, cv2);
+      cell.addEventListener('click',()=>{ pushUndo(); enterAdvanced(i); draw(); closeSym(); });
+      grid.appendChild(cell);
+    }
+  }
+}
+function openSym(){ buildSymGallery(); document.getElementById('symModal').classList.add('show'); }
+function closeSym(){ document.getElementById('symModal').classList.remove('show'); }
+document.getElementById('symClose').addEventListener('click',closeSym);
+document.getElementById('btnAdvanced').addEventListener('click',openSym);
 document.getElementById('btnSimple').addEventListener('click',()=>{pushUndo();setPattern(pat?pat.type:'sqT');});
 document.getElementById('advPrev').addEventListener('click',()=>{pushUndo();advGo(advTypeIndex-1);});
 document.getElementById('advNext').addEventListener('click',()=>{pushUndo();advGo(advTypeIndex+1);});
@@ -1932,13 +2014,14 @@ document.getElementById('advReset').addEventListener('click',()=>{ pushUndo(); a
 // tile — then drag points or AI-fill it. ep = per-edge control points (masters;
 // slaves null and auto-derive). NOT copies of Escher's copyrighted drawings.
 const CREATURES=[{"n":"Lizards","s":"3-fold · p3","t":"rot3","cv":0.95,"a":"#e8732a","b":"#2f7d6e","ep":[[{"x":-0.2727,"y":-0.3825},{"x":-0.5453,"y":-0.3825},{"x":-0.5739,"y":-0.1385},{"x":-0.5739,"y":0.1341},{"x":-0.5739,"y":0.4067},{"x":-0.5739,"y":0.6793},{"x":-0.5739,"y":0.5785},{"x":-0.5739,"y":0.3059},{"x":-0.5739,"y":0.0333},{"x":-0.5739,"y":-0.2393},{"x":-0.4427,"y":-0.3825},{"x":-0.1701,"y":-0.3825},{"x":0.1025,"y":-0.3825},{"x":0.3751,"y":-0.3825}],null,[{"x":0.5747,"y":0.564},{"x":0.5747,"y":0.7135},{"x":0.5747,"y":0.4636},{"x":0.5747,"y":0.2138},{"x":0.5747,"y":-0.036},{"x":0.5747,"y":-0.2859},{"x":0.4205,"y":-0.3825},{"x":0.1707,"y":-0.3825},{"x":-0.0791,"y":-0.3825},{"x":-0.329,"y":-0.3825},{"x":-0.5739,"y":-0.3776},{"x":-0.5739,"y":-0.1277},{"x":-0.5739,"y":0.1221},{"x":-0.5739,"y":0.3719}],null,[{"x":-0.5739,"y":0.2666},{"x":-0.5739,"y":0.2252},{"x":-0.5739,"y":0.1838},{"x":-0.5739,"y":0.1423},{"x":-0.5739,"y":0.1009},{"x":-0.5739,"y":0.0594},{"x":-0.5739,"y":0.018},{"x":-0.5739,"y":-0.0235},{"x":-0.5739,"y":-0.0649},{"x":-0.5739,"y":-0.1064},{"x":-0.5739,"y":-0.1478},{"x":-0.5739,"y":-0.1892},{"x":-0.5739,"y":-0.2307},{"x":-0.5739,"y":-0.2721}],null]},{"n":"Birds","s":"glide · pg","t":"glide","cv":0.9,"a":"#e0a93b","b":"#3a6ea5","ep":[[{"x":-0.4119,"y":-0.4198},{"x":-0.3169,"y":-0.3561},{"x":-0.2361,"y":-0.3765},{"x":-0.1832,"y":-0.4781},{"x":-0.1225,"y":-0.5751},{"x":-0.0566,"y":-0.6653},{"x":-0.0254,"y":-0.7754},{"x":0.0205,"y":-0.7679},{"x":0.0513,"y":-0.6577},{"x":0.12,"y":-0.5689},{"x":0.1799,"y":-0.4714},{"x":0.233,"y":-0.37},{"x":0.3146,"y":-0.3596},{"x":0.4096,"y":-0.4232}],[{"x":0.6173,"y":-0.6273},{"x":0.7178,"y":-0.6896},{"x":0.7483,"y":-0.5147},{"x":0.772,"y":-0.3389},{"x":0.7901,"y":-0.1625},{"x":0.8452,"y":0.0045},{"x":0.7177,"y":0.0764},{"x":0.545,"y":0.1156},{"x":0.3749,"y":0.1655},{"x":0.3313,"y":0.2419},{"x":0.5042,"y":0.2773},{"x":0.6818,"y":0.2774},{"x":0.7971,"y":0.3291},{"x":0.6839,"y":0.4642}],null,null]},{"n":"Doves","s":"translation · p1","t":"sqT","cv":0.9,"a":"#e0a93b","b":"#2f6f8f","ep":[[{"x":-0.4119,"y":-0.4198},{"x":-0.3169,"y":-0.3561},{"x":-0.2361,"y":-0.3765},{"x":-0.1832,"y":-0.4781},{"x":-0.1225,"y":-0.5751},{"x":-0.0566,"y":-0.6653},{"x":-0.0254,"y":-0.7754},{"x":0.0205,"y":-0.7679},{"x":0.0513,"y":-0.6577},{"x":0.12,"y":-0.5689},{"x":0.1799,"y":-0.4714},{"x":0.233,"y":-0.37},{"x":0.3146,"y":-0.3596},{"x":0.4096,"y":-0.4232}],[{"x":0.6173,"y":-0.6273},{"x":0.7178,"y":-0.6896},{"x":0.7483,"y":-0.5147},{"x":0.772,"y":-0.3389},{"x":0.7901,"y":-0.1625},{"x":0.8452,"y":0.0045},{"x":0.7177,"y":0.0764},{"x":0.545,"y":0.1156},{"x":0.3749,"y":0.1655},{"x":0.3313,"y":0.2419},{"x":0.5042,"y":0.2773},{"x":0.6818,"y":0.2774},{"x":0.7971,"y":0.3291},{"x":0.6839,"y":0.4642}],null,null]},{"n":"Songbirds","s":"glide · pg","t":"glide","cv":0.9,"a":"#d98a3d","b":"#41707f","ep":[[{"x":-0.6037,"y":-0.7796},{"x":-0.4842,"y":-0.7802},{"x":-0.4121,"y":-0.6439},{"x":-0.3277,"y":-0.7966},{"x":-0.252,"y":-0.6868},{"x":-0.2551,"y":-0.5102},{"x":-0.149,"y":-0.49},{"x":-0.1021,"y":-0.6596},{"x":0.001,"y":-0.8019},{"x":0.1566,"y":-0.8813},{"x":0.3315,"y":-0.8779},{"x":0.4809,"y":-0.7876},{"x":0.6142,"y":-0.6961},{"x":0.6856,"y":-0.6126}],[{"x":0.6375,"y":-0.4228},{"x":0.7193,"y":-0.3338},{"x":0.7592,"y":-0.2201},{"x":0.7556,"y":-0.0993},{"x":0.7187,"y":0.0162},{"x":0.6598,"y":0.1224},{"x":0.5823,"y":0.2157},{"x":0.4898,"y":0.2944},{"x":0.3843,"y":0.3544},{"x":0.4257,"y":0.4328},{"x":0.5376,"y":0.4375},{"x":0.6586,"y":0.4357},{"x":0.7429,"y":0.5069},{"x":0.6385,"y":0.4894}],null,null]}];
-// abstract-template & advanced starters for the patterns without a baked creature
+// plain SYMMETRY starters (undeformed tiles to build your own on) — honestly named,
+// not creatures. For the full set of 81, use "All tilings — choose visually".
 const INSPIRE_EXTRA=[
-  {n:'Fish #20',   s:'4-fold · p4',  t:'rot4', tpl:'Fish'},
-  {n:'Whirl',      s:'2-fold · p2',  t:'rot2', tpl:'Fish'},
-  {n:'Honeycomb',  s:'hex · p1',     t:'hexT', tpl:'Jigsaw'},
-  {n:'Butterflies',s:'6-fold · p6',  adv:19},   // IH21 (Advanced engine)
-  {n:'Swans',      s:'glide² · pgg',  adv:4},    // IH5  (Advanced engine)
+  {n:'4-fold',      s:'square · p4',  t:'rot4', tpl:'Fish'},
+  {n:'2-fold',      s:'p2',           t:'rot2', tpl:'Fish'},
+  {n:'Hexagon',     s:'hex · p1',     t:'hexT', tpl:'Jigsaw'},
+  {n:'6-fold',      s:'p6 · advanced', adv:19},  // IH21
+  {n:'Double-glide',s:'pgg · advanced', adv:4},  // IH5
 ];
 function applyCreature(c){
   pushUndo(); setPattern(c.t);
@@ -1985,7 +2068,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 20 (2026-06-28)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 21 (2026-06-28)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
