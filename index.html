@@ -132,6 +132,9 @@
   .aiAutoRow input{flex:1 1 180px; background:#1c1f26; color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:9px; font-size:13px}
   .aiAutoRow select{background:#1c1f26; color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:9px}
   .aiOr{text-align:center; color:var(--muted); font-size:12px; margin:10px 0}
+  .aiResRow{display:flex; gap:12px; margin-top:10px; flex-wrap:wrap}
+  .aiResCol{text-align:center}
+  .prevc{display:block; background:#11141a; border:1px solid var(--accent); border-radius:8px; max-width:100%}
   .aiGrid{display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px}
   .aiStep{background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:12px; display:flex; flex-direction:column}
   .aiNum{font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--accent); font-weight:700; margin-bottom:10px}
@@ -264,6 +267,13 @@
         <button class="act primary" id="aiAutoBtn" style="margin:0;white-space:nowrap">⚡ Generate &amp; fill</button>
       </div>
       <div class="aiHint" id="aiAutoStatus">Uses <b>gpt-image-1</b> (~$0.02–0.17/image). "Clean creature" draws a crisp animal and tiles it as a flock — the nicest results.</div>
+      <div id="aiResult" style="display:none">
+        <div class="aiResRow">
+          <div class="aiResCol"><canvas id="aiCreaturePrev" width="150" height="150" class="prevc"></canvas><div class="aiHint">what the AI drew</div></div>
+          <div class="aiResCol"><canvas id="aiTilePrev" width="230" height="150" class="prevc"></canvas><div class="aiHint">how it tiles</div></div>
+        </div>
+        <div class="aiHint">Good? <b>Close</b> to use it. Not quite? Edit the prompt and <b>Generate</b> again.</div>
+      </div>
     </div>
     <div class="aiOr">— or do it by hand with ChatGPT —</div>
 
@@ -1593,13 +1603,23 @@ async function autoFill(){
     const b64=j.data&&j.data[0]&&j.data[0].b64_json;
     if(!b64) throw new Error('No image returned.');
     pushUndo();
-    loadTexFromURL('data:image/png;base64,'+b64, ()=>{
+    const dataURL='data:image/png;base64,'+b64;
+    loadTexFromURL(dataURL, ()=>{
       useTexture=true; document.getElementById('aiUse').checked=true;
       if(mode==='creature'){   // stamp whole creatures into a flock, packed a bit
         document.getElementById('stampMode').checked=true; texZoom=1.25; document.getElementById('aiZoom').value=1.25;
       } else { document.getElementById('stampMode').checked=false; texZoom=1; document.getElementById('aiZoom').value=1; }
       buildProcessedTex(); aiStatusText(); draw();
-      status.textContent='✓ Done! Tweak zoom / gap colour on the right, or Generate again for a new take.';
+      // in-dialog preview so you can judge the result without closing
+      const cprev=document.getElementById('aiCreaturePrev'), cx=cprev.getContext('2d');
+      cx.clearRect(0,0,cprev.width,cprev.height);
+      cx.fillStyle='#cfd6e0'; cx.fillRect(0,0,cprev.width,cprev.height);   // light bg so transparent art shows
+      cx.drawImage(texImage,0,0,cprev.width,cprev.height);
+      const tprev=document.getElementById('aiTilePrev'), tx=tprev.getContext('2d');
+      tx.clearRect(0,0,tprev.width,tprev.height);
+      tx.drawImage(cv,0,0,tprev.width,tprev.height);                        // copy the live tiling
+      document.getElementById('aiResult').style.display='';
+      status.textContent='✓ Done — preview below. Close to use it, or Generate again.';
     });
   }catch(err){
     status.textContent='✗ '+err.message+(/40[13]|verif/i.test(err.message)?'  (gpt-image-1 needs a verified org + credits — check platform.openai.com billing.)':'');
@@ -1719,7 +1739,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 12 (2026-06-28)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 13 (2026-06-28)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
