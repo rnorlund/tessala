@@ -16,13 +16,24 @@
     font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     display:flex; height:100vh; overflow:hidden;
   }
-  /* sidebar */
-  #side{
-    width:280px; flex:0 0 280px; background:var(--panel);
-    border-right:1px solid var(--line); padding:14px; overflow-y:auto;
+  /* sidebars */
+  #side, #sideR{
+    width:262px; flex:0 0 262px; background:var(--panel);
+    padding:14px; overflow-y:auto;
   }
-  #side h1{font-size:16px; margin:0 0 2px}
+  #side{ order:1; border-right:1px solid var(--line); }
+  #sideR{ order:3; border-left:1px solid var(--line); }
+  #side.hidden, #sideR.hidden{ display:none; }
+  #side h1{font-size:16px; margin:0}
   #side .sub{color:var(--muted); font-size:12px; margin-bottom:14px}
+  .sideTop{ display:flex; align-items:flex-start; justify-content:space-between; }
+  .sideHd{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+  .sideHd span{ font-size:13px; font-weight:600; color:var(--muted); }
+  .collapse{ background:var(--panel2); border:1px solid var(--line); color:var(--ink);
+    border-radius:6px; width:26px; height:26px; cursor:pointer; font-size:15px; line-height:1; flex:0 0 auto; }
+  .collapse:hover{ border-color:var(--accent); }
+  #topbar .pill.ptog{ cursor:pointer; }
+  #topbar .pill.ptog:hover{ border-color:var(--accent); color:var(--ink); }
   .group{margin-bottom:18px}
   .group > .lbl{font-size:11px; text-transform:uppercase; letter-spacing:.06em;
     color:var(--muted); margin-bottom:7px; font-weight:600}
@@ -63,7 +74,7 @@
   .chk{display:flex; align-items:center; gap:8px; cursor:pointer}
   .chk input{width:16px;height:16px}
   /* stage */
-  #stage{flex:1; position:relative; overflow:hidden; background:
+  #stage{flex:1; order:2; position:relative; overflow:hidden; background:
     repeating-conic-gradient(#22262e 0% 25%, #1d2128 0% 50%) 50% / 28px 28px;}
   canvas{display:block; position:absolute; inset:0}
   #topbar{position:absolute; top:10px; left:10px; right:10px; display:flex; gap:8px;
@@ -134,8 +145,10 @@
 </head>
 <body>
 <aside id="side">
-  <h1>Tessala</h1>
-  <div class="sub">Escher-style tessellations, with AI.</div>
+  <div class="sideTop">
+    <div><h1>Tessala</h1><div class="sub">Escher-style tessellations, with AI.</div></div>
+    <button class="collapse" id="hideLeft" title="Hide panel">‹</button>
+  </div>
 
   <div class="group">
     <div class="lbl">1 · Pattern (symmetry)</div>
@@ -183,8 +196,13 @@
     </div>
   </div>
 
+</aside>
+
+<aside id="sideR">
+  <div class="sideHd"><span>Style &amp; Output</span><button class="collapse" id="hideRight" title="Hide panel">›</button></div>
+
   <div class="group">
-    <div class="lbl">3 · Colors</div>
+    <div class="lbl">Colors</div>
     <div class="swatches">
       <div class="sw"><input type="color" id="colA" value="#e6b35a"><span>Fill A</span></div>
       <div class="sw"><input type="color" id="colB" value="#5aa0e6"><span>Fill B</span></div>
@@ -197,7 +215,7 @@
   </div>
 
   <div class="group">
-    <div class="lbl">4 · View</div>
+    <div class="lbl">View</div>
     <div class="row"><label>Tile size</label><input type="range" id="scale" min="40" max="220" step="1" value="110"></div>
     <label class="chk"><input type="checkbox" id="showHandles" checked> Show edit handles</label>
     <label class="chk" style="margin-top:6px"><input type="checkbox" id="dimOthers"> Spotlight the editable tile</label>
@@ -205,10 +223,11 @@
   </div>
 
   <div class="group">
+    <div class="lbl">Create &amp; Output</div>
     <button class="act" id="btnUndo">↶ Undo (⌘/Ctrl-Z)</button>
     <button class="act primary" id="btnGen">✨ Idea generator</button>
-    <button class="act" id="btnSaveColl">★ Save to my collection</button>
     <button class="act" id="btnAI">🤖 AI fill workflow</button>
+    <button class="act" id="btnSaveColl">★ Save to my collection</button>
     <button class="act" id="btnReset">Reset shape</button>
     <button class="act" id="btnClearDraw">Clear drawing</button>
     <button class="act" id="btnPng">Export PNG</button>
@@ -262,8 +281,11 @@
 <main id="stage">
   <canvas id="cv"></canvas>
   <div id="topbar">
+    <div class="pill ptog" id="tgLeft" title="Show/hide left panel">☰ Tools</div>
     <div class="pill" id="patPill"><b>—</b></div>
     <div class="pill">scroll = zoom · drag empty space (Pan tool) = move</div>
+    <div style="flex:1"></div>
+    <div class="pill ptog" id="tgRight" title="Show/hide right panel">Style ☰</div>
   </div>
 </main>
 
@@ -1604,6 +1626,19 @@ const INSPIRE=[
     ig.appendChild(el);
   });
 })();
+
+/* ---- collapsible panels ---- */
+function togglePanel(id, force){
+  const el=document.getElementById(id);
+  if(force===true) el.classList.add('hidden');
+  else if(force===false) el.classList.remove('hidden');
+  else el.classList.toggle('hidden');
+  resize();   // canvas follows the stage width
+}
+document.getElementById('tgLeft').addEventListener('click',()=>togglePanel('side'));
+document.getElementById('tgRight').addEventListener('click',()=>togglePanel('sideR'));
+document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('side',true));
+document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
 setPattern('sqT');
