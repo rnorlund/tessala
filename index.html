@@ -275,8 +275,9 @@
       </div>
       <div class="aiAutoRow">
         <select id="aiMode" title="how the picture is used">
-          <option value="outline" selected>A · Keep MY tile → fill with a creature posed to fit it</option>
-          <option value="interlock">B · New creature → reshape the tile to it (Escher)</option>
+          <option value="redraw" selected>C · Best — reshape tile to figure, then re-draw it in (crisp, 2 calls)</option>
+          <option value="outline">A · Keep MY tile → fill with a creature posed to fit it</option>
+          <option value="interlock">B · New creature → reshape tile + warp (gapless, 1 call)</option>
           <option value="creature">Free creature → stamp (flock / wallpaper)</option>
         </select>
         <select id="aiQuality">
@@ -1873,18 +1874,18 @@ async function autoFill(){
       fd.append('size','1024x1024'); fd.append('quality', quality); fd.append('background','transparent'); fd.append('n','1');
       res=await fetch('https://api.openai.com/v1/images/edits',{method:'POST',headers:{Authorization:'Bearer '+key},body:fd});
     } else {
-      // clean whole creature on transparent bg (for interlock-warp, or to stamp as a flock)
+      // clean whole creature on transparent bg (silhouette source for interlock/redraw, or to stamp)
       const prompt=(rich || ('A single stylized '+subject))
-        +(mode==='interlock'
-            ? ' One whole creature, limbs/wings/tail spread OUT to make a full, compact, rounded silhouette that nearly fills the frame (it will be warped to interlock). '
+        +((mode==='interlock'||mode==='redraw')
+            ? ' One whole subject, limbs/wings/tail tucked or spread to make a full, COMPACT, rounded silhouette that nearly fills the frame with no thin gaps. '
             : ' Centred and filling the frame. ')
-        +'Fully transparent background, no scenery, no ground, no text, no shadow — only the creature.';
+        +'Fully transparent background, no scenery, no ground, no text, no shadow — only the subject.';
       res=await fetch('https://api.openai.com/v1/images/generations',{method:'POST',
         headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},
         body:JSON.stringify({model:'gpt-image-1',prompt,size:'1024x1024',quality,background:'transparent',n:1})});
     }
     if(!res.ok){ let msg; try{msg=(await res.json()).error.message;}catch(e){msg=await res.text();} throw new Error('HTTP '+res.status+' — '+(msg||'').slice(0,200)); }
-    progStop(); setProg(0.88);
+    progStop(); setProg(mode==='redraw'?0.5:0.88);
     const j=await res.json();
     const b64=j.data&&j.data[0]&&j.data[0].b64_json;
     if(!b64) throw new Error('No image returned.');
@@ -1896,7 +1897,7 @@ async function autoFill(){
       useTexture=true; document.getElementById('aiUse').checked=true;
       if(mode==='creature'){   // stamp whole creatures into a flock, packed a bit
         document.getElementById('stampMode').checked=true; texZoom=1.25; document.getElementById('aiZoom').value=1.25;
-      } else { document.getElementById('stampMode').checked=false; texZoom=1.00; document.getElementById('aiZoom').value=1.00; }
+      } else { document.getElementById('stampMode').checked=false; texZoom=(mode==='redraw'?1.04:1.00); document.getElementById('aiZoom').value=texZoom; }
       tool='pan';
       document.querySelectorAll('.tool').forEach(x=>x.classList.toggle('on', x.dataset.tool==='pan'));
       cv.style.cursor='grab'; document.getElementById('shapeHelp').style.display='none';
@@ -1912,7 +1913,31 @@ async function autoFill(){
       status.textContent='✓ Done — preview below. Close to use it, or Generate again.';
       setProg(1); setTimeout(()=>progShow(false), 900);
     };
-    if(mode==='interlock'){
+    if(mode==='redraw'){
+      // C (best): reshape the tile to the figure's silhouette, then have the AI RE-DRAW the
+      // figure straight into that exact tile (no warp -> no smearing). 2nd API call.
+      status.textContent='🧩 Reshaping the tile to the figure…'; setProg(0.55);
+      await new Promise((resolve,reject)=>{
+        const ci=new Image();
+        ci.onload=async ()=>{ try{
+          if(!escherFit(ci,1024)){ reject(new Error('Could not read the figure silhouette — try a bolder subject.')); return; }
+          const shapeBlob=await (await fetch(buildShapePNG())).blob();   // white silhouette of the fitted tile
+          status.textContent='🎨 Re-drawing the figure into the tile… (15–45s)'; progCreep(0.55,0.96,30);
+          const body='The white region is a tile shaped like '+subject+'. Draw '+subject+' EXACTLY filling the white silhouette, undistorted and natural, the body following the outline. '
+            +(rich||'')+' Thick clean black outlines, bold flat colours. Absolutely NO background; transparent everywhere outside the white shape. Same 1024x1024, do not crop or rescale.';
+          const fd=new FormData(); fd.append('model','gpt-image-1'); fd.append('image',shapeBlob,'shape.png');
+          fd.append('prompt',body); fd.append('size','1024x1024'); fd.append('quality',quality); fd.append('background','transparent'); fd.append('n','1');
+          const r2=await fetch('https://api.openai.com/v1/images/edits',{method:'POST',headers:{Authorization:'Bearer '+key},body:fd});
+          progStop();
+          if(!r2.ok){ let m; try{m=(await r2.json()).error.message;}catch(e){m=await r2.text();} reject(new Error('redraw HTTP '+r2.status+' — '+(m||'').slice(0,150))); return; }
+          const j2=await r2.json(); const b2=j2.data&&j2.data[0]&&j2.data[0].b64_json;
+          if(!b2){ reject(new Error('No redraw image returned.')); return; }
+          loadTexFromURL('data:image/png;base64,'+b2, ()=>{ applyResult(); resolve(); });
+        }catch(e){ reject(e); } };
+        ci.onerror=()=>reject(new Error('figure image failed to load'));
+        ci.src=dataURL;
+      });
+    } else if(mode==='interlock'){
       // B: reshape the tile to the creature, then warp to fill -> gap-free interlock
       status.textContent='🧩 Reshaping the tile to the creature…'; setProg(0.94);
       await new Promise((resolve,reject)=>{
@@ -2143,7 +2168,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 23 (2026-06-29)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 24 (2026-06-29)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
