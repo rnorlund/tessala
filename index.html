@@ -1361,8 +1361,8 @@ function randomGenome(P,o){
   const ep=[]; for(let i=0;i<P.n;i++) ep[i]=randEdge(P,i,o3); return ep;
 }
 function cloneEp(ep){return ep.map(a=>a?a.map(p=>({x:p.x,y:p.y})):null);}
-function mutate(P,ep,o){
-  const wild=o.wild, detail=o.detail;
+function mutate(P,ep,o,loose){
+  const wild=o.wild, detail=o.detail; let last=null;
   for(let tries=0;tries<8;tries++){
     const out=cloneEp(ep);
     for(let i=0;i<P.n;i++){
@@ -1382,8 +1382,9 @@ function mutate(P,ep,o){
       }
     }
     if(simple(outlineOf(P,out))) return out;
+    last=out;
   }
-  return cloneEp(ep);
+  return loose ? (last||cloneEp(ep)) : cloneEp(ep);   // seeded creatures: keep the variation even if slightly non-simple
 }
 function crossover(P,a,b){
   for(let tries=0;tries<8;tries++){
@@ -1396,7 +1397,7 @@ function paramOnEdgeP(P,i,lp){const c0=P.corners[i],c1=P.corners[(i+1)%P.n];
   const dx=c1.x-c0.x,dy=c1.y-c0.y,l2=dx*dx+dy*dy;return ((lp.x-c0.x)*dx+(lp.y-c0.y)*dy)/l2;}
 
 // ---- gallery ----
-let genPat=null, candidates=[];
+let genPat=null, candidates=[], genSeed=null, genSeedName=null;   // genSeed = a premade creature's edges to evolve from
 function genVal(id){return parseFloat(document.getElementById(id).value);}
 function genOpts(){return {wild:genVal('genWild'), detail:genVal('genDetail'), lobe:genVal('genLobe'), spike:genVal('genSpike')};}
 function pickType(){ // current pattern, or a random one when "mix patterns" is on
@@ -1405,7 +1406,14 @@ function pickType(){ // current pattern, or a random one when "mix patterns" is 
 }
 function newBatch(){
   candidates=[]; const o=genOpts();
-  for(let i=0;i<15;i++){ const type=pickType(); candidates.push({type, ep:randomGenome(buildPattern(type),o), liked:false}); }
+  if(genSeed){
+    // evolve FROM a premade creature: keep the original + simple mutations of it
+    const P=buildPattern(genPat.type);
+    candidates.push({type:genPat.type, ep:cloneEp(genSeed), liked:false});
+    for(let i=0;i<14;i++) candidates.push({type:genPat.type, ep:mutate(P, genSeed, {...o, wild:o.wild*(0.6+i*0.05)}, true), liked:false});
+  } else {
+    for(let i=0;i<15;i++){ const type=pickType(); candidates.push({type, ep:randomGenome(buildPattern(type),o), liked:false}); }
+  }
   renderGallery();
 }
 function evolve(){
@@ -1422,9 +1430,9 @@ function evolve(){
     let child;
     if(sameType.length>=2 && Math.random()<0.5){
       const q=sameType[Math.floor(Math.random()*sameType.length)];
-      child=mutate(P, crossover(P,p.ep,q.ep), o);
+      child=mutate(P, crossover(P,p.ep,q.ep), o, !!genSeed);
     } else {
-      child=mutate(P, p.ep, {...o, wild:o.wild*1.1});
+      child=mutate(P, p.ep, {...o, wild:o.wild*1.1}, !!genSeed);
     }
     next.push({type:p.type, ep:child, liked:false});
   }
@@ -1536,10 +1544,21 @@ function useGenome(type, ep){
 }
 function syncGenMini(){
   const m=document.getElementById('genPatMini'); m.innerHTML='';
+  // base symmetries (random tiles) — clears any creature seed
   PATTERNS.forEach(p=>{
-    const el=document.createElement('div'); el.className='pat'+(p.type===genPat.type?' on':'');
+    const el=document.createElement('div'); el.className='pat'+((!genSeed && p.type===genPat.type)?' on':'');
     el.innerHTML='<div class="nm">'+p.name+'</div>';
-    el.addEventListener('click',()=>{ genPat=buildPattern(p.type); syncGenMini(); newBatch(); });
+    el.addEventListener('click',()=>{ genSeed=null; genSeedName=null; genPat=buildPattern(p.type); syncGenMini(); newBatch(); });
+    m.appendChild(el);
+  });
+  // premade creatures (evolve FROM them) — only simple variations survive the generator's filter
+  (typeof CREATURES!=='undefined'?CREATURES:[]).forEach(c=>{
+    const el=document.createElement('div'); el.className='pat'+(genSeedName===c.n?' on':'');
+    el.innerHTML='<div class="nm">'+c.n+'</div>';
+    el.title='Evolve from the '+c.n+' tile';
+    el.addEventListener('click',()=>{ genSeed=cloneEp(c.ep); genSeedName=c.n; genPat=buildPattern(c.t);
+      curvature=c.cv; const gc=document.getElementById('genCurve'); if(gc) gc.value=c.cv;
+      syncGenMini(); newBatch(); });
     m.appendChild(el);
   });
 }
@@ -1559,7 +1578,7 @@ document.getElementById('genSteps').addEventListener('input',e=>{
   CURVE_STEPS=parseInt(e.target.value,10);
   renderActive(); draw();
 });
-function openGen(){ genPat=buildPattern(pat.type); document.getElementById('genModal').classList.add('show');
+function openGen(){ genSeed=null; genSeedName=null; genPat=buildPattern(pat.type); document.getElementById('genModal').classList.add('show');
   syncGenMini(); updateSavedBtn(); newBatch(); applyGridSize(); }
 function closeGen(){ document.getElementById('genModal').classList.remove('show'); }
 document.getElementById('btnGen').addEventListener('click',openGen);
@@ -2168,7 +2187,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 24 (2026-06-29)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 25 (2026-06-29)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
