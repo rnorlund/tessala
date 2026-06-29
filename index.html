@@ -278,6 +278,7 @@
           <option value="redraw" selected>C · Best — reshape tile to figure, then re-draw it in (crisp, 2 calls)</option>
           <option value="outline">A · Keep MY tile → fill with a creature posed to fit it</option>
           <option value="interlock">B · New creature → reshape tile + warp (gapless, 1 call)</option>
+          <option value="ref">R · Reference image → redraw THAT character into my tile</option>
           <option value="creature">Free creature → stamp (flock / wallpaper)</option>
         </select>
         <select id="aiQuality">
@@ -286,6 +287,11 @@
           <option value="high" selected>high · best</option>
         </select>
         <button class="act primary" id="aiAutoBtn" style="margin:0;white-space:nowrap">⚡ Generate &amp; fill</button>
+      </div>
+      <div class="aiAutoRow" id="aiRefRow">
+        <button class="act" id="aiRefBtn" style="margin:0;white-space:nowrap">📎 Reference image…</button>
+        <span id="aiRefStatus" class="aiHint" style="flex:1;align-self:center">For mode <b>R</b>: a character photo/drawing to redraw into your tile. <i>none loaded</i></span>
+        <button class="act" id="aiRefClear" style="margin:0;display:none;white-space:nowrap">✕</button>
       </div>
       <div id="aiProg" style="display:none;height:7px;border-radius:5px;background:#1c1f26;border:1px solid var(--line);overflow:hidden;margin:2px 0 4px">
         <div id="aiProgFill" style="height:100%;width:0%;background:linear-gradient(90deg,#3a6ea5,#6ea8fe);transition:width .25s ease"></div>
@@ -479,7 +485,7 @@ function buildPattern(type){
 const PATTERNS=[
   {type:'sqT',  name:'Square',   gp:'translation'},
   {type:'hexT', name:'Hexagon',  gp:'translation'},
-  {type:'rot2', name:'2-fold',   gp:'rotation · p2'},
+  {type:'rot2', name:'2-fold ⟳', gp:'p2 · upright + upside-down'},
   {type:'rot3', name:'3-fold',   gp:'rotation · p3'},
   {type:'rot4', name:'4-fold',   gp:'rotation · p4'},
   {type:'glide',name:'Glide',    gp:'reflection · pg'},
@@ -1873,13 +1879,25 @@ async function autoFill(){
   progShow(true); setProg(0.04);
   try{
     // Step 1: expand the short subject into a rich art-director prompt (what ChatGPT does internally)
-    status.textContent='✍️ Writing a detailed prompt…';
-    const rich = await expandPrompt(subject, key);
+    let rich=null;
+    if(mode!=='ref'){ status.textContent='✍️ Writing a detailed prompt…'; rich = await expandPrompt(subject, key); }
     setProg(0.1);
     let res;
     status.textContent='⏳ Drawing with gpt-image-1… (15–45s)';
     progCreep(0.1, 0.85, 35);                       // creep while the image renders
-    if(mode==='outline'){
+    if(mode==='ref'){
+      // R: redraw the character from a REFERENCE image into the current tile shape (multi-image edit)
+      if(!aiRefFile) throw new Error('Attach a reference image first (📎 Reference image…).');
+      const shapeBlob=await (await fetch(buildShapePNG())).blob();   // current tile silhouette
+      const who=(document.getElementById('aiSubjectA').value||'').trim();
+      const fd=new FormData();
+      fd.append('model','gpt-image-1');
+      fd.append('image[]', shapeBlob, 'shape.png');
+      fd.append('image[]', aiRefFile, aiRefFile.name||'ref.png');
+      fd.append('prompt','The FIRST image is a white tile silhouette (transparent outside). The SECOND image shows '+(who||'a character')+'. Redraw THAT SAME character — same hair, face, clothing and colours — re-posed and bent so the body COMPLETELY fills the white silhouette to every edge, undistorted and natural, leaving NO transparent gaps inside the shape. Thick clean black outlines, bold flat colours. Transparent everywhere outside the white silhouette. Output 1024x1024.');
+      fd.append('size','1024x1024'); fd.append('quality', quality); fd.append('background','transparent'); fd.append('n','1');
+      res=await fetch('https://api.openai.com/v1/images/edits',{method:'POST',headers:{Authorization:'Bearer '+key},body:fd});
+    } else if(mode==='outline'){
       // WORKFLOW A: keep the user's tile; draw a creature POSED to conform to it
       const shapeBlob=await (await fetch(buildShapePNG())).blob();   // locks texFrame for alignment
       const body = 'The attached image is a tile shape: the WHITE region is the tile, transparent is outside. '
@@ -1916,7 +1934,7 @@ async function autoFill(){
       useTexture=true; document.getElementById('aiUse').checked=true;
       if(mode==='creature'){   // stamp whole creatures into a flock, packed a bit
         document.getElementById('stampMode').checked=true; texZoom=1.25; document.getElementById('aiZoom').value=1.25;
-      } else { document.getElementById('stampMode').checked=false; texZoom=(mode==='redraw'?1.04:1.00); document.getElementById('aiZoom').value=texZoom; }
+      } else { document.getElementById('stampMode').checked=false; texZoom=((mode==='redraw'||mode==='ref')?1.04:1.00); document.getElementById('aiZoom').value=texZoom; }
       tool='pan';
       document.querySelectorAll('.tool').forEach(x=>x.classList.toggle('on', x.dataset.tool==='pan'));
       cv.style.cursor='grab'; document.getElementById('shapeHelp').style.display='none';
@@ -1989,6 +2007,20 @@ let texImageURL=null;
 document.getElementById('btnAI').addEventListener('click',openAI);
 document.getElementById('aiClose').addEventListener('click',closeAI);
 document.getElementById('aiAutoBtn').addEventListener('click',autoFill);
+let aiRefURL=null, aiRefFile=null;
+document.getElementById('aiRefBtn').addEventListener('click',()=>{
+  const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
+  inp.onchange=()=>{ const f=inp.files[0]; if(!f) return; aiRefFile=f;
+    const r=new FileReader(); r.onload=()=>{ aiRefURL=r.result;
+      document.getElementById('aiRefStatus').innerHTML='✓ reference loaded — mode <b>R</b> selected. Add a name in "what to draw" (optional), then Generate.';
+      document.getElementById('aiRefClear').style.display='';
+      document.getElementById('aiMode').value='ref';
+    }; r.readAsDataURL(f); };
+  inp.click();
+});
+document.getElementById('aiRefClear').addEventListener('click',()=>{ aiRefURL=null; aiRefFile=null;
+  document.getElementById('aiRefStatus').innerHTML='For mode <b>R</b>: a character photo/drawing to redraw into your tile. <i>none loaded</i>';
+  document.getElementById('aiRefClear').style.display='none'; });
 document.getElementById('aiSubject').addEventListener('input',e=>{
   document.getElementById('aiPrompt').value=defaultPrompt(e.target.value);
 });
@@ -2187,7 +2219,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 25 (2026-06-29)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 26 (2026-06-29)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
