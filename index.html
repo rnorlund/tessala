@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tessala — Escher-style tessellation studio</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%231c1f26'/><polygon points='16,2 28.1,9 16,16 3.9,9' fill='%23e6a93b'/><polygon points='3.9,9 16,16 16,30 3.9,23' fill='%232f7d6e'/><polygon points='28.1,9 28.1,23 16,30 16,16' fill='%233a7ab0'/></svg>">
 <style>
   :root{
     --bg:#1c1f26; --panel:#252a33; --panel2:#2e343f; --line:#3a4150;
@@ -214,8 +215,8 @@
 
   <div class="group" id="shapeHelp">
     <div class="hint">
-      <b>Shape tool:</b> drag the dots to warp an edge — the matching edge updates so it still tiles.
-      <b>Double-click</b> an edge to add a dot. <b>Right-click</b> a dot to delete it.
+      <b>Shape tool:</b> click the dotted edge to add a dot and drag it — the matching edge updates so it still tiles.
+      <b>Double-click a dot</b> to switch it ◻ sharp corner ↔ ◯ smooth curve. <b>Right-click</b> a dot to delete it.
     </div>
   </div>
 
@@ -274,9 +275,9 @@
       </div>
       <div class="aiAutoRow">
         <select id="aiMode" title="how the picture is used">
-          <option value="interlock" selected>true interlock → warp creature to fill the tile (Escher)</option>
-          <option value="outline">fill the tile shape → clip (intact creature, some background)</option>
-          <option value="creature">free creature → stamp (flock / wallpaper)</option>
+          <option value="outline" selected>A · Keep MY tile → fill with a creature posed to fit it</option>
+          <option value="interlock">B · New creature → reshape the tile to it (Escher)</option>
+          <option value="creature">Free creature → stamp (flock / wallpaper)</option>
         </select>
         <select id="aiQuality">
           <option value="low">low · cheapest</option>
@@ -285,7 +286,10 @@
         </select>
         <button class="act primary" id="aiAutoBtn" style="margin:0;white-space:nowrap">⚡ Generate &amp; fill</button>
       </div>
-      <div class="aiHint" id="aiAutoStatus">Uses <b>gpt-image-1</b> (~$0.02–0.17/image). <b>"True interlock"</b> draws a whole creature, reshapes the tile to its silhouette, and warps it to fill — a real gap-free Escher tessellation (nothing cut, no background).</div>
+      <div id="aiProg" style="display:none;height:7px;border-radius:5px;background:#1c1f26;border:1px solid var(--line);overflow:hidden;margin:2px 0 4px">
+        <div id="aiProgFill" style="height:100%;width:0%;background:linear-gradient(90deg,#3a6ea5,#6ea8fe);transition:width .25s ease"></div>
+      </div>
+      <div class="aiHint" id="aiAutoStatus"><b>A · Keep my tile:</b> draws a creature posed to fit your current tile, fills it gap-free. <b>B · New creature:</b> draws a creature and reshapes the tile to it. Uses <b>gpt-image-1</b> (~$0.02–0.17).</div>
       <div id="aiResult" style="display:none">
         <div class="aiResRow">
           <div class="aiResCol"><canvas id="aiCreaturePrev" width="150" height="150" class="prevc"></canvas><div class="aiHint">what the AI drew</div></div>
@@ -582,7 +586,24 @@ const lerpP=(a,b,t)=>({x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t});
 // conditions -> the curve depends only on these points; result blended toward
 // the straight polyline by c. Uses only distances + lerps, so it's isometry-
 // equivariant (slave edges transform a master's samples and seams stay exact).
+// Wrapper: split the point list at interior CORNER points (flagged .corner) and
+// smooth each run separately, so a corner point becomes a sharp kink while the
+// rest stays curved. Corners + non-corner points can be mixed on one edge.
 function smoothFull(pts, c, steps){
+  const n=pts.length;
+  const breaks=[0];
+  for(let i=1;i<n-1;i++) if(pts[i] && pts[i].corner) breaks.push(i);
+  breaks.push(n-1);
+  if(breaks.length<=2) return smoothRun(pts, c, steps);
+  const out=[];
+  for(let b=0;b<breaks.length-1;b++){
+    const run=smoothRun(pts.slice(breaks[b], breaks[b+1]+1), c, steps);
+    if(b>0) run.shift();                 // drop the shared corner already emitted
+    for(const p of run) out.push(p);
+  }
+  return out;
+}
+function smoothRun(pts, c, steps){
   const n=pts.length;
   if(c<=0 || n<3) return pts.map(p=>({x:p.x,y:p.y}));
   const A=0.5, out=[], nseg=n-1;
@@ -936,9 +957,9 @@ function drawHandles(S){
   const COLOR={master:'#ffffff', self:'#ffd166', selfMirror:'#ffd166', slave:'#9fd0ff'};
   for(const h of getHandles()){
     const p=M.apply(S,h.disp);
-    ctx.beginPath(); ctx.arc(p.x,p.y,6,0,7);
-    ctx.fillStyle=COLOR[h.kind]||'#fff'; ctx.fill();
-    ctx.lineWidth=2; ctx.strokeStyle='#1c1f26'; ctx.stroke();
+    ctx.fillStyle=COLOR[h.kind]||'#fff'; ctx.lineWidth=2; ctx.strokeStyle='#1c1f26';
+    if(h.corner){ ctx.beginPath(); ctx.rect(p.x-5.5,p.y-5.5,11,11); ctx.fill(); ctx.stroke(); }  // square = sharp corner
+    else { ctx.beginPath(); ctx.arc(p.x,p.y,6,0,7); ctx.fill(); ctx.stroke(); }                   // round = smooth
   }
   ctx.restore();
 }
@@ -950,18 +971,18 @@ function getHandles(){
   for(let i=0;i<n;i++){
     const role=pat.role[i], ci=pat.corners[i], ci1=pat.corners[(i+1)%n];
     if(role==='master'){
-      edgePts[i].forEach((p,idx)=>hs.push({disp:p, owner:i, idx, kind:'master',
+      edgePts[i].forEach((p,idx)=>hs.push({disp:p, owner:i, idx, kind:'master', corner:!!p.corner,
         toStore:lp=>({x:lp.x,y:lp.y})}));
     } else if(role==='self'){
       const Mc=mid(ci,ci1);
       const toFirstHalf=lp=> (paramOnEdge(i,lp)<=0.5? {x:lp.x,y:lp.y} : {x:2*Mc.x-lp.x,y:2*Mc.y-lp.y});
       edgePts[i].forEach((p,idx)=>{
-        hs.push({disp:p, owner:i, idx, kind:'self', toStore:toFirstHalf});
-        hs.push({disp:{x:2*Mc.x-p.x,y:2*Mc.y-p.y}, owner:i, idx, kind:'selfMirror', toStore:toFirstHalf});
+        hs.push({disp:p, owner:i, idx, kind:'self', corner:!!p.corner, toStore:toFirstHalf});
+        hs.push({disp:{x:2*Mc.x-p.x,y:2*Mc.y-p.y}, owner:i, idx, kind:'selfMirror', corner:!!p.corner, toStore:toFirstHalf});
       });
     } else { // slave — handles map back to the master via the inverse transform
       const pr=pat.pairings.find(p=>p.s===i), j=pr.m, g=pr.g, gi=M.inv(g);
-      edgePts[j].forEach((p,idx)=>hs.push({disp:M.apply(g,p), owner:j, idx, kind:'slave',
+      edgePts[j].forEach((p,idx)=>hs.push({disp:M.apply(g,p), owner:j, idx, kind:'slave', corner:!!p.corner,
         toStore:lp=>M.apply(gi,lp)}));
     }
   }
@@ -1056,7 +1077,12 @@ window.addEventListener('mousemove',e=>{
   const sp=mouse(e); const lp=toLocal(sp);
   if(advDrag){ const el=M.apply(M.inv(advEdgeE[advDrag.id]), lp);
     advEdges[advDrag.id][advDrag.idx]={x:Math.max(0.06,Math.min(0.94,el.x)), y:el.y}; advBuild(); draw(); return; }
-  if(drag){ edgePts[drag.owner][drag.idx]=drag.toStore(lp); draw(); return; }
+  if(drag){ const was=edgePts[drag.owner][drag.idx], np=drag.toStore(lp);
+    if(was&&was.corner) np.corner=true;                    // keep sharp/smooth state while dragging
+    edgePts[drag.owner][drag.idx]=np;
+    sortOwner(drag.owner);                                  // reorder LIVE (not on release) so the curve
+    drag.idx=edgePts[drag.owner].indexOf(np);               // never "snaps" when you cross a neighbour;
+    draw(); return; }                                       // keep controlling the same point we grabbed
   if(curStroke){ curStroke.pts.push(lp);
     if(curStroke.pts.length>1){ strokes.push(curStroke); draw(); strokes.pop(); }
     return; }
@@ -1064,7 +1090,7 @@ window.addEventListener('mousemove',e=>{
 });
 window.addEventListener('mouseup',()=>{
   if(advDrag){ advEdges[advDrag.id].sort((a,b)=>a.x-b.x); advBuild(); advDrag=null; draw(); }
-  if(drag){ sortOwner(drag.owner); drag=null; draw(); }
+  if(drag){ drag=null; draw(); }                            // already sorted live during the drag
   if(curStroke){ if(curStroke.pts.length>1) strokes.push(curStroke); curStroke=null; draw(); }
   panStart=null;
 });
@@ -1080,7 +1106,10 @@ cv.addEventListener('dblclick',e=>{
       advEdges[best.id].sort((a,b)=>a.x-b.x); advBuild(); draw(); }
     return;
   }
-  // simple engine: a single click on the dotted edge already adds a point (see mousedown)
+  // simple engine: single click on the edge adds a point (see mousedown);
+  // double-click an existing point toggles it sharp corner <-> smooth curve
+  const h=nearestHandle(sp, 12*12);
+  if(h){ const p=edgePts[h.owner][h.idx]; pushUndo(); p.corner=!p.corner; draw(); }
 });
 cv.addEventListener('wheel',e=>{
   e.preventDefault();
@@ -1757,6 +1786,42 @@ function escherWarp(creatureImg){
   }
   return cv2.toDataURL('image/png');
 }
+// KEEP the current (user-designed) tile and warp a creature's silhouette to fill it
+// exactly — no reshape, no clip, no background. Use when the creature was drawn to
+// CONFORM to this tile (via /images/edits), so silhouette ≈ tile and the warp is small.
+function warpToCurrentTile(creatureImg){
+  const RES=1024, N=260;
+  const cont=alphaContour(creatureImg, RES); if(!cont) return null;
+  const S0=resampleClosed(cont, N);
+  texFrame=computeTexFrame(buildOutline());
+  const out=buildOutline();
+  const Tunit=out.map(p=>({x:(p.x-texFrame.x)/texFrame.w, y:(p.y-texFrame.y)/texFrame.h}));
+  const T=resampleClosed(Tunit, N).map(p=>({x:p.x*RES, y:p.y*RES}));
+  const S=bestAlign(S0, T);                                   // align creature loop to the tile loop
+  const cS=centroidOf(S), cT=centroidOf(T);
+  const cv2=document.createElement('canvas'); cv2.width=cv2.height=RES;
+  const g=cv2.getContext('2d'); g.clearRect(0,0,RES,RES); g.imageSmoothingQuality='high';
+  const src=document.createElement('canvas'); src.width=src.height=RES;
+  src.getContext('2d').drawImage(creatureImg,0,0,RES,RES);
+  for(let i=0;i<N;i++){ const j=(i+1)%N;
+    const m=affineTri([cS,S[i],S[j]],[cT,T[i],T[j]]); if(!m) continue;
+    g.save(); g.beginPath(); g.moveTo(cT.x,cT.y); g.lineTo(T[i].x,T[i].y); g.lineTo(T[j].x,T[j].y); g.closePath(); g.clip();
+    g.setTransform(m[0],m[1],m[2],m[3],m[4],m[5]); g.drawImage(src,0,0);
+    g.setTransform(1,0,0,1,0,0); g.restore();
+  }
+  return cv2.toDataURL('image/png');
+}
+// progress bar for the generate→fill pipeline (API has no true progress, so the
+// long "drawing" stage eases toward a ceiling by elapsed time; stages snap it forward)
+let progTimer=null;
+function setProg(f){ const el=document.getElementById('aiProgFill'); if(el) el.style.width=Math.max(0,Math.min(1,f))*100+'%'; }
+function progShow(on){ const p=document.getElementById('aiProg'); if(p) p.style.display=on?'block':'none'; if(on) setProg(0); }
+function progStop(){ if(progTimer){ clearInterval(progTimer); progTimer=null; } }
+function progCreep(base, target, secs){           // asymptotically approach target, never reaching it
+  progStop(); const t0=performance.now();
+  progTimer=setInterval(()=>{ const t=(performance.now()-t0)/1000;
+    setProg(base+(target-base)*(1-Math.exp(-t/(secs/3)))); }, 120);
+}
 function aiStatusText(){
   document.getElementById('aiStatus').textContent =
     texImage ? ('Image loaded ✓ — '+(useTexture?'showing in tiling':'hidden')) : 'No image loaded.';
@@ -1785,18 +1850,23 @@ async function autoFill(){
   const quality=document.getElementById('aiQuality').value;
   const mode=document.getElementById('aiMode').value;
   const btn=document.getElementById('aiAutoBtn'); btn.disabled=true;
+  progShow(true); setProg(0.04);
   try{
     // Step 1: expand the short subject into a rich art-director prompt (what ChatGPT does internally)
     status.textContent='✍️ Writing a detailed prompt…';
     const rich = await expandPrompt(subject, key);
+    setProg(0.1);
     let res;
     status.textContent='⏳ Drawing with gpt-image-1… (15–45s)';
+    progCreep(0.1, 0.85, 35);                       // creep while the image renders
     if(mode==='outline'){
-      // fill the tile outline -> true clipped tessellation
+      // WORKFLOW A: keep the user's tile; draw a creature POSED to conform to it
       const shapeBlob=await (await fetch(buildShapePNG())).blob();   // locks texFrame for alignment
       const body = 'The attached image is a tile shape: the WHITE region is the tile, transparent is outside. '
-        + (rich || ('Draw '+subject+'.'))
-        + ' The creature must fill the ENTIRE white silhouette to every edge, bleeding slightly past. Keep the head, face, eye and beak/mouth in the deep INTERIOR of the white shape, away from its edges; only the tail, limbs, wing-tips and feather/scale texture should reach the edges and corners. Absolutely NO background, scenery, ground or sky inside the shape — any area not covered by the creature must be transparent. Same 1024x1024 dimensions.';
+        + 'Draw '+subject+' POSED and BENT so its body PLAUSIBLY fits and fills this exact white silhouette — '
+        + 'twist the head, body, wings, limbs and tail to follow the shape, sending an appendage into each bump and lobe of the outline so it looks like a natural creature that happens to fit, not a creature pasted on top. '
+        + (rich || '')
+        + ' Fill the ENTIRE white silhouette to every edge, bleeding slightly past. Bold flat high-contrast colours, thick clean black outlines. Absolutely NO background, scenery, ground or sky — any area not covered by the creature must be transparent. Same 1024x1024 dimensions, do not crop or rescale.';
       const fd=new FormData();
       fd.append('model','gpt-image-1'); fd.append('image', shapeBlob, 'shape.png');
       fd.append('prompt', body);
@@ -1814,6 +1884,7 @@ async function autoFill(){
         body:JSON.stringify({model:'gpt-image-1',prompt,size:'1024x1024',quality,background:'transparent',n:1})});
     }
     if(!res.ok){ let msg; try{msg=(await res.json()).error.message;}catch(e){msg=await res.text();} throw new Error('HTTP '+res.status+' — '+(msg||'').slice(0,200)); }
+    progStop(); setProg(0.88);
     const j=await res.json();
     const b64=j.data&&j.data[0]&&j.data[0].b64_json;
     if(!b64) throw new Error('No image returned.');
@@ -1839,26 +1910,30 @@ async function autoFill(){
       tx.drawImage(cv,0,0,tprev.width,tprev.height);
       document.getElementById('aiResult').style.display='';
       status.textContent='✓ Done — preview below. Close to use it, or Generate again.';
+      setProg(1); setTimeout(()=>progShow(false), 900);
     };
     if(mode==='interlock'){
-      // warp the whole creature so its silhouette becomes the tile -> true interlock
-      status.textContent='🧩 Warping the creature to interlock the tile…';
+      // B: reshape the tile to the creature, then warp to fill -> gap-free interlock
+      status.textContent='🧩 Reshaping the tile to the creature…'; setProg(0.94);
       await new Promise((resolve,reject)=>{
         const ci=new Image();
         ci.onload=()=>{
           const warped=escherWarp(ci);
-          if(!warped){ reject(new Error('Could not read the creature silhouette — try a simpler / bolder subject.')); return; }
+          if(!warped){ reject(new Error('Could not read the creature silhouette — try a bolder subject.')); return; }
           loadTexFromURL(warped, ()=>{ applyResult(ci); resolve(); });
         };
         ci.onerror=()=>reject(new Error('creature image failed to load'));
         ci.src=dataURL;
       });
     } else {
+      // A (outline): keep YOUR tile, drop the conforming creature in, clipped to your shape.
+      // creature: stamp the whole image. Both just load the AI image directly (no warp).
       loadTexFromURL(dataURL, ()=>applyResult(texImage));
     }
   }catch(err){
     status.textContent='✗ '+err.message+(/40[13]|verif/i.test(err.message)?'  (gpt-image-1 needs a verified org + credits — check platform.openai.com billing.)':'');
   }
+  progStop(); progShow(false);
   btn.disabled=false;
 }
 function loadTexFromURL(url, cb){
@@ -2013,7 +2088,7 @@ document.getElementById('advReset').addEventListener('click',()=>{ pushUndo(); a
 // symmetry method via the app's Escherization fit). Click to load an editable
 // tile — then drag points or AI-fill it. ep = per-edge control points (masters;
 // slaves null and auto-derive). NOT copies of Escher's copyrighted drawings.
-const CREATURES=[{"n":"Lizards","s":"3-fold · p3","t":"rot3","cv":0.95,"a":"#e8732a","b":"#2f7d6e","ep":[[{"x":-0.2727,"y":-0.3825},{"x":-0.5453,"y":-0.3825},{"x":-0.5739,"y":-0.1385},{"x":-0.5739,"y":0.1341},{"x":-0.5739,"y":0.4067},{"x":-0.5739,"y":0.6793},{"x":-0.5739,"y":0.5785},{"x":-0.5739,"y":0.3059},{"x":-0.5739,"y":0.0333},{"x":-0.5739,"y":-0.2393},{"x":-0.4427,"y":-0.3825},{"x":-0.1701,"y":-0.3825},{"x":0.1025,"y":-0.3825},{"x":0.3751,"y":-0.3825}],null,[{"x":0.5747,"y":0.564},{"x":0.5747,"y":0.7135},{"x":0.5747,"y":0.4636},{"x":0.5747,"y":0.2138},{"x":0.5747,"y":-0.036},{"x":0.5747,"y":-0.2859},{"x":0.4205,"y":-0.3825},{"x":0.1707,"y":-0.3825},{"x":-0.0791,"y":-0.3825},{"x":-0.329,"y":-0.3825},{"x":-0.5739,"y":-0.3776},{"x":-0.5739,"y":-0.1277},{"x":-0.5739,"y":0.1221},{"x":-0.5739,"y":0.3719}],null,[{"x":-0.5739,"y":0.2666},{"x":-0.5739,"y":0.2252},{"x":-0.5739,"y":0.1838},{"x":-0.5739,"y":0.1423},{"x":-0.5739,"y":0.1009},{"x":-0.5739,"y":0.0594},{"x":-0.5739,"y":0.018},{"x":-0.5739,"y":-0.0235},{"x":-0.5739,"y":-0.0649},{"x":-0.5739,"y":-0.1064},{"x":-0.5739,"y":-0.1478},{"x":-0.5739,"y":-0.1892},{"x":-0.5739,"y":-0.2307},{"x":-0.5739,"y":-0.2721}],null]},{"n":"Birds","s":"glide · pg","t":"glide","cv":0.9,"a":"#e0a93b","b":"#3a6ea5","ep":[[{"x":-0.4119,"y":-0.4198},{"x":-0.3169,"y":-0.3561},{"x":-0.2361,"y":-0.3765},{"x":-0.1832,"y":-0.4781},{"x":-0.1225,"y":-0.5751},{"x":-0.0566,"y":-0.6653},{"x":-0.0254,"y":-0.7754},{"x":0.0205,"y":-0.7679},{"x":0.0513,"y":-0.6577},{"x":0.12,"y":-0.5689},{"x":0.1799,"y":-0.4714},{"x":0.233,"y":-0.37},{"x":0.3146,"y":-0.3596},{"x":0.4096,"y":-0.4232}],[{"x":0.6173,"y":-0.6273},{"x":0.7178,"y":-0.6896},{"x":0.7483,"y":-0.5147},{"x":0.772,"y":-0.3389},{"x":0.7901,"y":-0.1625},{"x":0.8452,"y":0.0045},{"x":0.7177,"y":0.0764},{"x":0.545,"y":0.1156},{"x":0.3749,"y":0.1655},{"x":0.3313,"y":0.2419},{"x":0.5042,"y":0.2773},{"x":0.6818,"y":0.2774},{"x":0.7971,"y":0.3291},{"x":0.6839,"y":0.4642}],null,null]},{"n":"Doves","s":"translation · p1","t":"sqT","cv":0.9,"a":"#e0a93b","b":"#2f6f8f","ep":[[{"x":-0.4119,"y":-0.4198},{"x":-0.3169,"y":-0.3561},{"x":-0.2361,"y":-0.3765},{"x":-0.1832,"y":-0.4781},{"x":-0.1225,"y":-0.5751},{"x":-0.0566,"y":-0.6653},{"x":-0.0254,"y":-0.7754},{"x":0.0205,"y":-0.7679},{"x":0.0513,"y":-0.6577},{"x":0.12,"y":-0.5689},{"x":0.1799,"y":-0.4714},{"x":0.233,"y":-0.37},{"x":0.3146,"y":-0.3596},{"x":0.4096,"y":-0.4232}],[{"x":0.6173,"y":-0.6273},{"x":0.7178,"y":-0.6896},{"x":0.7483,"y":-0.5147},{"x":0.772,"y":-0.3389},{"x":0.7901,"y":-0.1625},{"x":0.8452,"y":0.0045},{"x":0.7177,"y":0.0764},{"x":0.545,"y":0.1156},{"x":0.3749,"y":0.1655},{"x":0.3313,"y":0.2419},{"x":0.5042,"y":0.2773},{"x":0.6818,"y":0.2774},{"x":0.7971,"y":0.3291},{"x":0.6839,"y":0.4642}],null,null]},{"n":"Songbirds","s":"glide · pg","t":"glide","cv":0.9,"a":"#d98a3d","b":"#41707f","ep":[[{"x":-0.6037,"y":-0.7796},{"x":-0.4842,"y":-0.7802},{"x":-0.4121,"y":-0.6439},{"x":-0.3277,"y":-0.7966},{"x":-0.252,"y":-0.6868},{"x":-0.2551,"y":-0.5102},{"x":-0.149,"y":-0.49},{"x":-0.1021,"y":-0.6596},{"x":0.001,"y":-0.8019},{"x":0.1566,"y":-0.8813},{"x":0.3315,"y":-0.8779},{"x":0.4809,"y":-0.7876},{"x":0.6142,"y":-0.6961},{"x":0.6856,"y":-0.6126}],[{"x":0.6375,"y":-0.4228},{"x":0.7193,"y":-0.3338},{"x":0.7592,"y":-0.2201},{"x":0.7556,"y":-0.0993},{"x":0.7187,"y":0.0162},{"x":0.6598,"y":0.1224},{"x":0.5823,"y":0.2157},{"x":0.4898,"y":0.2944},{"x":0.3843,"y":0.3544},{"x":0.4257,"y":0.4328},{"x":0.5376,"y":0.4375},{"x":0.6586,"y":0.4357},{"x":0.7429,"y":0.5069},{"x":0.6385,"y":0.4894}],null,null]}];
+const CREATURES=[{"n":"Lizards","s":"3-fold · p3","t":"rot3","cv":0.95,"a":"#e8732a","b":"#2f7d6e","ep":[[{"x":-0.2727,"y":-0.3825},{"x":-0.5453,"y":-0.3825},{"x":-0.5739,"y":-0.1385},{"x":-0.5739,"y":0.1341},{"x":-0.5739,"y":0.4067},{"x":-0.5739,"y":0.6793},{"x":-0.5739,"y":0.5785},{"x":-0.5739,"y":0.3059},{"x":-0.5739,"y":0.0333},{"x":-0.5739,"y":-0.2393},{"x":-0.4427,"y":-0.3825},{"x":-0.1701,"y":-0.3825},{"x":0.1025,"y":-0.3825},{"x":0.3751,"y":-0.3825}],null,[{"x":0.5747,"y":0.564},{"x":0.5747,"y":0.7135},{"x":0.5747,"y":0.4636},{"x":0.5747,"y":0.2138},{"x":0.5747,"y":-0.036},{"x":0.5747,"y":-0.2859},{"x":0.4205,"y":-0.3825},{"x":0.1707,"y":-0.3825},{"x":-0.0791,"y":-0.3825},{"x":-0.329,"y":-0.3825},{"x":-0.5739,"y":-0.3776},{"x":-0.5739,"y":-0.1277},{"x":-0.5739,"y":0.1221},{"x":-0.5739,"y":0.3719}],null,[{"x":-0.5739,"y":0.2666},{"x":-0.5739,"y":0.2252},{"x":-0.5739,"y":0.1838},{"x":-0.5739,"y":0.1423},{"x":-0.5739,"y":0.1009},{"x":-0.5739,"y":0.0594},{"x":-0.5739,"y":0.018},{"x":-0.5739,"y":-0.0235},{"x":-0.5739,"y":-0.0649},{"x":-0.5739,"y":-0.1064},{"x":-0.5739,"y":-0.1478},{"x":-0.5739,"y":-0.1892},{"x":-0.5739,"y":-0.2307},{"x":-0.5739,"y":-0.2721}],null]},{"n":"Birds","s":"glide · pg","t":"glide","cv":0.9,"a":"#e0a93b","b":"#3a6ea5","ep":[[{"x":-0.4119,"y":-0.4198},{"x":-0.3169,"y":-0.3561},{"x":-0.2361,"y":-0.3765},{"x":-0.1832,"y":-0.4781},{"x":-0.1225,"y":-0.5751},{"x":-0.0566,"y":-0.6653},{"x":-0.0254,"y":-0.7754},{"x":0.0205,"y":-0.7679},{"x":0.0513,"y":-0.6577},{"x":0.12,"y":-0.5689},{"x":0.1799,"y":-0.4714},{"x":0.233,"y":-0.37},{"x":0.3146,"y":-0.3596},{"x":0.4096,"y":-0.4232}],[{"x":0.6173,"y":-0.6273},{"x":0.7178,"y":-0.6896},{"x":0.7483,"y":-0.5147},{"x":0.772,"y":-0.3389},{"x":0.7901,"y":-0.1625},{"x":0.8452,"y":0.0045},{"x":0.7177,"y":0.0764},{"x":0.545,"y":0.1156},{"x":0.3749,"y":0.1655},{"x":0.3313,"y":0.2419},{"x":0.5042,"y":0.2773},{"x":0.6818,"y":0.2774},{"x":0.7971,"y":0.3291},{"x":0.6839,"y":0.4642}],null,null]},{"n":"Doves","s":"translation · p1","t":"sqT","cv":0.9,"a":"#e0a93b","b":"#2f6f8f","ep":[[{"x":-0.4119,"y":-0.4198},{"x":-0.3169,"y":-0.3561},{"x":-0.2361,"y":-0.3765},{"x":-0.1832,"y":-0.4781},{"x":-0.1225,"y":-0.5751},{"x":-0.0566,"y":-0.6653},{"x":-0.0254,"y":-0.7754},{"x":0.0205,"y":-0.7679},{"x":0.0513,"y":-0.6577},{"x":0.12,"y":-0.5689},{"x":0.1799,"y":-0.4714},{"x":0.233,"y":-0.37},{"x":0.3146,"y":-0.3596},{"x":0.4096,"y":-0.4232}],[{"x":0.6173,"y":-0.6273},{"x":0.7178,"y":-0.6896},{"x":0.7483,"y":-0.5147},{"x":0.772,"y":-0.3389},{"x":0.7901,"y":-0.1625},{"x":0.8452,"y":0.0045},{"x":0.7177,"y":0.0764},{"x":0.545,"y":0.1156},{"x":0.3749,"y":0.1655},{"x":0.3313,"y":0.2419},{"x":0.5042,"y":0.2773},{"x":0.6818,"y":0.2774},{"x":0.7971,"y":0.3291},{"x":0.6839,"y":0.4642}],null,null]},{"n":"Songbirds","s":"glide · pg","t":"glide","cv":0.9,"a":"#d98a3d","b":"#41707f","ep":[[{"x":-0.6037,"y":-0.7796},{"x":-0.4842,"y":-0.7802},{"x":-0.4121,"y":-0.6439},{"x":-0.3277,"y":-0.7966},{"x":-0.252,"y":-0.6868},{"x":-0.2551,"y":-0.5102},{"x":-0.149,"y":-0.49},{"x":-0.1021,"y":-0.6596},{"x":0.001,"y":-0.8019},{"x":0.1566,"y":-0.8813},{"x":0.3315,"y":-0.8779},{"x":0.4809,"y":-0.7876},{"x":0.6142,"y":-0.6961},{"x":0.6856,"y":-0.6126}],[{"x":0.6375,"y":-0.4228},{"x":0.7193,"y":-0.3338},{"x":0.7592,"y":-0.2201},{"x":0.7556,"y":-0.0993},{"x":0.7187,"y":0.0162},{"x":0.6598,"y":0.1224},{"x":0.5823,"y":0.2157},{"x":0.4898,"y":0.2944},{"x":0.3843,"y":0.3544},{"x":0.4257,"y":0.4328},{"x":0.5376,"y":0.4375},{"x":0.6586,"y":0.4357},{"x":0.7429,"y":0.5069},{"x":0.6385,"y":0.4894}],null,null]},{"n":"Dancers","s":"glide · pg","t":"glide","cv":0.9,"a":"#d96b4a","b":"#3a6ea5","ep":[[{"x":-0.3751,"y":-0.4784},{"x":-0.281,"y":-0.4191},{"x":-0.1806,"y":-0.3716},{"x":-0.1703,"y":-0.4073},{"x":-0.1864,"y":-0.5145},{"x":-0.1361,"y":-0.6116},{"x":-0.0411,"y":-0.6661},{"x":0.0674,"y":-0.6544},{"x":0.1465,"y":-0.5795},{"x":0.1631,"y":-0.472},{"x":0.1117,"y":-0.3757},{"x":0.1808,"y":-0.3762},{"x":0.284,"y":-0.4176},{"x":0.3806,"y":-0.4727}],[{"x":0.6102,"y":-0.6151},{"x":0.73,"y":-0.719},{"x":0.8695,"y":-0.7371},{"x":0.8399,"y":-0.5898},{"x":0.722,"y":-0.4849},{"x":0.6114,"y":-0.3711},{"x":0.4852,"y":-0.2748},{"x":0.3494,"y":-0.1923},{"x":0.2071,"y":-0.1219},{"x":0.1372,"y":0.0088},{"x":0.2387,"y":0.1131},{"x":0.3465,"y":0.2296},{"x":0.4811,"y":0.3001},{"x":0.4089,"y":0.4389}],null,null]}];
 // plain SYMMETRY starters (undeformed tiles to build your own on) — honestly named,
 // not creatures. For the full set of 81, use "All tilings — choose visually".
 const INSPIRE_EXTRA=[
@@ -2068,7 +2143,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 21 (2026-06-28)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 22 (2026-06-29)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
