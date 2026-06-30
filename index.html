@@ -256,7 +256,7 @@
     <button class="act" id="btnReset">Reset shape</button>
     <button class="act" id="btnClearDraw">Clear drawing</button>
     <div class="act" style="display:flex;align-items:center;gap:8px;cursor:default">curve / smoothness
-      <input type="range" id="curveMain" min="0" max="2" step="0.05" value="0.9" style="flex:1" title="edge curvature — higher = smoother, rounder shapes"></div>
+      <input type="range" id="curveMain" min="0" max="2" step="0.05" value="1" style="flex:1" title="edge curvature — higher = smoother, rounder shapes"></div>
     <button class="act" id="btnPng">Export PNG</button>
     <button class="act" id="btnShape" title="Download the tile outline as a transparent PNG to hand to ChatGPT">⬇ Tile shape PNG</button>
     <button class="act" id="btnSave">Save design</button>
@@ -378,7 +378,7 @@
     <span id="genTip">click a tile to ♥ rate it · then Evolve</span>
     <div class="spacer"></div>
     <div class="ctl">size<input type="range" id="genSize" min="120" max="520" step="10" value="180" style="width:90px"></div>
-    <div class="ctl">curve<input type="range" id="genCurve" min="0" max="2" step="0.05" value="0.9" style="width:80px"></div>
+    <div class="ctl">curve<input type="range" id="genCurve" min="0" max="2" step="0.05" value="1" style="width:80px"></div>
     <div class="ctl">smooth<input type="range" id="genSteps" min="8" max="36" step="2" value="14" title="curve resolution — higher = smoother" style="width:70px"></div>
     <div class="ctl">wild<input type="range" id="genWild" min="0.08" max="0.55" step="0.01" value="0.32" style="width:70px"></div>
     <div class="ctl">detail<input type="range" id="genDetail" min="2" max="9" step="1" value="5" style="width:60px"></div>
@@ -565,7 +565,7 @@ function edgeDisplayPtsOf(P, ep, i){
   const mp=[P.corners[j], ...ep[j], P.corners[(j+1)%n]].map(p=>M.apply(g,p));
   return (dist2(mp[0],ci) <= dist2(mp[0],ci1)) ? mp : mp.slice().reverse();
 }
-let curvature=0.9;   // 0 = straight polygon, 1 = fully smooth, up to 2 = extra round (global)
+let curvature=1.0;   // full smoothing by default -> rounded domes through dropped dots (slider 0..2)
 let texImage=null, texFrame=null, useTexture=false;  // AI-generated fill image
 let texZoom=1, texOffX=0, texOffY=0;                  // fit the image into the tile
 let texProcessed=null;                                // image with light areas blended to gap colour
@@ -2264,7 +2264,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 27 (2026-06-30)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 28 (2026-06-30)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
