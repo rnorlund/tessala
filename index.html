@@ -216,6 +216,7 @@
   <div class="group" id="shapeHelp">
     <div class="hint">
       <b>Shape tool:</b> click the dotted edge to add a dot and drag it — the matching edge updates so it still tiles.
+      Drag the small <b style="color:#5fe39a">green tilt handle</b> off each dot to bend/round the curve there (right-click it to reset).
       <b>Double-click a dot</b> to switch it ◻ sharp corner ↔ ◯ smooth curve. <b>Right-click</b> a dot to delete it.
     </div>
   </div>
@@ -255,7 +256,7 @@
     <button class="act" id="btnReset">Reset shape</button>
     <button class="act" id="btnClearDraw">Clear drawing</button>
     <div class="act" style="display:flex;align-items:center;gap:8px;cursor:default">curve / smoothness
-      <input type="range" id="curveMain" min="0" max="1.6" step="0.05" value="0.6" style="flex:1" title="edge curvature — higher = smoother, rounder shapes"></div>
+      <input type="range" id="curveMain" min="0" max="2" step="0.05" value="0.9" style="flex:1" title="edge curvature — higher = smoother, rounder shapes"></div>
     <button class="act" id="btnPng">Export PNG</button>
     <button class="act" id="btnShape" title="Download the tile outline as a transparent PNG to hand to ChatGPT">⬇ Tile shape PNG</button>
     <button class="act" id="btnSave">Save design</button>
@@ -377,7 +378,7 @@
     <span id="genTip">click a tile to ♥ rate it · then Evolve</span>
     <div class="spacer"></div>
     <div class="ctl">size<input type="range" id="genSize" min="120" max="520" step="10" value="180" style="width:90px"></div>
-    <div class="ctl">curve<input type="range" id="genCurve" min="0" max="1.6" step="0.05" value="0.6" style="width:80px"></div>
+    <div class="ctl">curve<input type="range" id="genCurve" min="0" max="2" step="0.05" value="0.9" style="width:80px"></div>
     <div class="ctl">smooth<input type="range" id="genSteps" min="8" max="36" step="2" value="14" title="curve resolution — higher = smoother" style="width:70px"></div>
     <div class="ctl">wild<input type="range" id="genWild" min="0.08" max="0.55" step="0.01" value="0.32" style="width:70px"></div>
     <div class="ctl">detail<input type="range" id="genDetail" min="2" max="9" step="1" value="5" style="width:60px"></div>
@@ -564,7 +565,7 @@ function edgeDisplayPtsOf(P, ep, i){
   const mp=[P.corners[j], ...ep[j], P.corners[(j+1)%n]].map(p=>M.apply(g,p));
   return (dist2(mp[0],ci) <= dist2(mp[0],ci1)) ? mp : mp.slice().reverse();
 }
-let curvature=0.6;   // 0 = straight polygon, 1 = fully smooth (global)
+let curvature=0.9;   // 0 = straight polygon, 1 = fully smooth, up to 2 = extra round (global)
 let texImage=null, texFrame=null, useTexture=false;  // AI-generated fill image
 let texZoom=1, texOffX=0, texOffY=0;                  // fit the image into the tile
 let texProcessed=null;                                // image with light areas blended to gap colour
@@ -618,6 +619,26 @@ function smoothRun(pts, c, steps){
   // shared vertices (prevents adjacent edges from crossing -> no corner overlap)
   const TP=0.16, edge=Math.sin(Math.PI*TP);
   const taper=u=>Math.min(1, Math.sin(Math.PI*u)/edge);
+  // If any point carries a tilt tangent (p.tx/ty), use a Hermite spline that honours
+  // those tangents (auto Catmull-Rom tangent elsewhere). Otherwise fall through to the
+  // original centripetal curve unchanged — so untouched shapes look exactly as before.
+  if(pts.some(p=>p && p.tx!=null)){
+    const T=[];
+    for(let i=0;i<n;i++){ const p=pts[i];
+      if(p.tx!=null){ T.push({x:p.tx, y:p.ty}); continue; }
+      const a=pts[i-1]||{x:2*p.x-pts[i+1].x, y:2*p.y-pts[i+1].y};
+      const b=pts[i+1]||{x:2*p.x-pts[i-1].x, y:2*p.y-pts[i-1].y};
+      T.push({x:(b.x-a.x)*0.5, y:(b.y-a.y)*0.5});
+    }
+    for(let i=0;i<nseg;i++){ const p1=pts[i], p2=pts[i+1], t1=T[i], t2=T[i+1];
+      for(let s=0;s<steps;s++){ const u=s/steps, u2=u*u, u3=u2*u;
+        const h00=2*u3-3*u2+1, h10=u3-2*u2+u, h01=-2*u3+3*u2, h11=u3-u2;
+        const hx=h00*p1.x+h10*t1.x+h01*p2.x+h11*t2.x, hy=h00*p1.y+h10*t1.y+h01*p2.y+h11*t2.y;
+        const lin=lerpP(p1,p2,u), ce=c*taper((i+s/steps)/nseg);
+        out.push({x:lin.x+(hx-lin.x)*ce, y:lin.y+(hy-lin.y)*ce}); } }
+    out.push({x:pts[n-1].x, y:pts[n-1].y});
+    return out;
+  }
   for(let i=0;i<nseg;i++){
     const p1=pts[i], p2=pts[i+1];
     const p0 = i-1>=0 ? pts[i-1] : {x:2*p1.x-p2.x, y:2*p1.y-p2.y};
@@ -962,7 +983,15 @@ function drawHandles(S){
     ctx.beginPath(); ctx.rect(p.x-4,p.y-4,8,8); ctx.fill(); ctx.stroke();}
   // every draggable control point (every edge is editable now)
   const COLOR={master:'#ffffff', self:'#ffd166', selfMirror:'#ffd166', slave:'#9fd0ff'};
-  for(const h of getHandles()){
+  const hs=getHandles();
+  // tilt (tangent) handles first: a thin line from the point to a small ring
+  for(const h of hs){ if(h.kind!=='tangent') continue;
+    const tp=M.apply(S,h.disp), pp=M.apply(S, edgePts[h.owner][h.idx]);
+    ctx.strokeStyle='rgba(120,230,170,.8)'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(pp.x,pp.y); ctx.lineTo(tp.x,tp.y); ctx.stroke();
+    ctx.beginPath(); ctx.arc(tp.x,tp.y,4.5,0,7); ctx.fillStyle='#1c2b22'; ctx.strokeStyle='#5fe39a'; ctx.lineWidth=2; ctx.fill(); ctx.stroke();
+  }
+  for(const h of hs){ if(h.kind==='tangent') continue;
     const p=M.apply(S,h.disp);
     ctx.fillStyle=COLOR[h.kind]||'#fff'; ctx.lineWidth=2; ctx.strokeStyle='#1c1f26';
     if(h.corner){ ctx.beginPath(); ctx.rect(p.x-5.5,p.y-5.5,11,11); ctx.fill(); ctx.stroke(); }  // square = sharp corner
@@ -973,19 +1002,30 @@ function drawHandles(S){
 /* Every draggable control point across ALL edges. Each handle knows which
    stored point it controls (owner edge + index) and how to convert a clicked
    local point back into that stored point (toStore). */
+// current tangent of master/self control point idx on edge i (override or auto Catmull-Rom), local coords
+function tanOf(i,idx){ const p=edgePts[i][idx]; if(p.tx!=null) return {x:p.tx,y:p.ty};
+  const pts=edgeDisplayPtsOf(pat,edgePts,i), k=idx+1, a=pts[k-1], b=pts[k+1]||pts[k];
+  return {x:(b.x-a.x)*0.5, y:(b.y-a.y)*0.5}; }
+// where to DRAW its tilt handle (min length so it's always grabbable)
+function tanDisp(i,idx){ const p=edgePts[i][idx], t=tanOf(i,idx); const L=Math.hypot(t.x,t.y);
+  let ux,uy; if(L<1e-4){ const pts=edgeDisplayPtsOf(pat,edgePts,i),k=idx+1,a=pts[k-1],b=pts[k+1]||pts[k],dx=b.x-a.x,dy=b.y-a.y,dl=Math.hypot(dx,dy)||1; ux=dx/dl;uy=dy/dl; }
+  else { ux=t.x/L; uy=t.y/L; }
+  const dl=Math.max(L,0.14); return {x:p.x+ux*dl, y:p.y+uy*dl}; }
 function getHandles(){
-  const hs=[]; const n=pat.n;
+  const hs=[]; const n=pat.n; const showTan=document.getElementById('showHandles') && document.getElementById('showHandles').checked;
   for(let i=0;i<n;i++){
     const role=pat.role[i], ci=pat.corners[i], ci1=pat.corners[(i+1)%n];
     if(role==='master'){
-      edgePts[i].forEach((p,idx)=>hs.push({disp:p, owner:i, idx, kind:'master', corner:!!p.corner,
-        toStore:lp=>({x:lp.x,y:lp.y})}));
+      edgePts[i].forEach((p,idx)=>{ hs.push({disp:p, owner:i, idx, kind:'master', corner:!!p.corner,
+        toStore:lp=>({x:lp.x,y:lp.y})});
+        if(showTan && !p.corner) hs.push({disp:tanDisp(i,idx), owner:i, idx, kind:'tangent', tan:true}); });
     } else if(role==='self'){
       const Mc=mid(ci,ci1);
       const toFirstHalf=lp=> (paramOnEdge(i,lp)<=0.5? {x:lp.x,y:lp.y} : {x:2*Mc.x-lp.x,y:2*Mc.y-lp.y});
       edgePts[i].forEach((p,idx)=>{
         hs.push({disp:p, owner:i, idx, kind:'self', corner:!!p.corner, toStore:toFirstHalf});
         hs.push({disp:{x:2*Mc.x-p.x,y:2*Mc.y-p.y}, owner:i, idx, kind:'selfMirror', corner:!!p.corner, toStore:toFirstHalf});
+        if(showTan && !p.corner) hs.push({disp:tanDisp(i,idx), owner:i, idx, kind:'tangent', tan:true});
       });
     } else { // slave — handles map back to the master via the inverse transform
       const pr=pat.pairings.find(p=>p.s===i), j=pr.m, g=pr.g, gi=M.inv(g);
@@ -1060,7 +1100,9 @@ cv.addEventListener('contextmenu',e=>{
   if(engine==='advanced'){ const h=nearestAdvHandle(mouse(e),15*15);
     if(h){ pushUndo(); advEdges[h.id].splice(h.idx,1); advBuild(); draw(); } return; }
   const h=nearestHandle(mouse(e), 14*14);
-  if(h && edgePts[h.owner].length>0){ pushUndo(); edgePts[h.owner].splice(h.idx,1); draw(); }
+  if(!h) return;
+  if(h.tan){ const p=edgePts[h.owner][h.idx]; pushUndo(); delete p.tx; delete p.ty; draw(); return; }  // reset tilt to auto
+  if(edgePts[h.owner].length>0){ pushUndo(); edgePts[h.owner].splice(h.idx,1); draw(); }
 });
 
 cv.addEventListener('mousedown',e=>{
@@ -1084,8 +1126,11 @@ window.addEventListener('mousemove',e=>{
   const sp=mouse(e); const lp=toLocal(sp);
   if(advDrag){ const el=M.apply(M.inv(advEdgeE[advDrag.id]), lp);
     advEdges[advDrag.id][advDrag.idx]={x:Math.max(0.06,Math.min(0.94,el.x)), y:el.y}; advBuild(); draw(); return; }
+  if(drag && drag.tan){                                     // tilt handle: set this point's tangent (Hermite kicks in)
+    const p=edgePts[drag.owner][drag.idx]; p.tx=lp.x-p.x; p.ty=lp.y-p.y; draw(); return; }
   if(drag){ const was=edgePts[drag.owner][drag.idx], np=drag.toStore(lp);
     if(was&&was.corner) np.corner=true;                    // keep sharp/smooth state while dragging
+    if(was&&was.tx!=null){ np.tx=was.tx; np.ty=was.ty; }   // keep tilt when moving the point itself
     edgePts[drag.owner][drag.idx]=np;
     sortOwner(drag.owner);                                  // reorder LIVE (not on release) so the curve
     drag.idx=edgePts[drag.owner].indexOf(np);               // never "snaps" when you cross a neighbour;
@@ -1207,7 +1252,7 @@ document.getElementById('curveMain').addEventListener('input',e=>{
   draw();
 });
 function snapshot(includeImage){
-  const o={type:pat.type, edgePts, strokes, curvature, useTexture, texFrame, texZoom, texOffX, texOffY,
+  const o={type:pat.type, edgePts:cloneEp(edgePts), strokes, curvature, useTexture, texFrame, texZoom, texOffX, texOffY,
     gapColor:gapColorVal(), blendWhite:document.getElementById('blendWhite').checked, blendAmt:val('blendAmt'),
     stampMode:document.getElementById('stampMode').checked,
     engine, advTypeIndex, advParams:advParams?advParams.slice():null,
@@ -1366,7 +1411,7 @@ function randomGenome(P,o){
   const o3={wild:o.wild*0.35, detail:2, lobe:o.lobe, spike:0};
   const ep=[]; for(let i=0;i<P.n;i++) ep[i]=randEdge(P,i,o3); return ep;
 }
-function cloneEp(ep){return ep.map(a=>a?a.map(p=>({x:p.x,y:p.y})):null);}
+function cloneEp(ep){return ep.map(a=>a?a.map(p=>{const o={x:p.x,y:p.y}; if(p.corner)o.corner=p.corner; if(p.tx!=null){o.tx=p.tx;o.ty=p.ty;} return o;}):null);}
 function mutate(P,ep,o,loose){
   const wild=o.wild, detail=o.detail; let last=null;
   for(let tries=0;tries<8;tries++){
@@ -2219,7 +2264,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 26 (2026-06-29)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 27 (2026-06-30)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
