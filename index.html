@@ -264,93 +264,139 @@
   </div>
 </aside>
 
+<style>
+  #aiWiz{min-height:340px}
+  .wizStep{animation:wizIn .18s ease}
+  @keyframes wizIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .wizTitle{font-size:17px;font-weight:600;margin:4px 0 14px}
+  .wizChoices{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}
+  .wizCard{display:flex;flex-direction:column;align-items:center;gap:6px;padding:26px 14px;background:var(--panel2);
+    border:2px solid var(--line);border-radius:14px;cursor:pointer;color:var(--txt);transition:all .1s;text-align:center}
+  .wizCard:hover{border-color:var(--accent);background:#1b2740;transform:translateY(-2px)}
+  .wizCard .ic{font-size:38px;line-height:1}
+  .wizCard .t{font-size:15px;font-weight:600}
+  .wizCard .s{font-size:12px;color:var(--muted)}
+  .wizField{width:100%;font-size:15px;padding:11px 12px;margin:4px 0}
+  .wizHint{font-size:12px;color:var(--muted);margin:8px 0 4px;line-height:1.5}
+  .wizNav{display:flex;justify-content:space-between;gap:10px;margin-top:18px}
+  .wizNav .act{margin:0}
+  .wizKeyRow{display:flex;align-items:center;gap:8px;margin-top:18px;font-size:12px;color:var(--muted)}
+  .wizKeyRow input{flex:1}
+  #wizDrop{border:2px dashed var(--line);border-radius:12px;padding:30px 16px;text-align:center;color:var(--muted);
+    cursor:pointer;background:rgba(255,255,255,.02);transition:all .1s}
+  #wizDrop:hover,#wizDrop.hot{border-color:var(--accent);background:#16233b;color:var(--txt)}
+  #wizDrop.has{padding:8px}
+  #wizDrop img{max-height:150px;max-width:100%;border-radius:8px;display:block;margin:0 auto}
+  #aiBigTile{width:100%;max-width:420px;border-radius:10px;display:block;margin:0 auto;background:#0c0f16}
+  #aiAdvanced summary{cursor:pointer;color:var(--muted);font-size:12px;padding:6px 0}
+  #aiAdvanced[open] summary{margin-bottom:8px}
+</style>
 <div id="aiModal">
   <div id="aiCard">
-    <div class="aiHead"><h2>🤖 AI fill workflow</h2><button id="aiClose">Close</button></div>
+    <div class="aiHead"><h2>🤖 Make a tessellation</h2><button id="aiClose">Close</button></div>
 
-    <div class="aiAuto">
-      <div class="aiNum">⚡ Auto-fill with your OpenAI key (one click)</div>
-      <div class="aiAutoRow">
-        <input id="aiKey" type="password" placeholder="OpenAI API key (sk-…) — stored only in this browser" autocomplete="off">
-        <input id="aiSubjectA" placeholder="what to draw — e.g. a koi fish, a barn owl">
-      </div>
-      <div class="aiAutoRow">
-        <select id="aiMode" title="how the picture is used">
-          <option value="auto" selected>★ Auto — search 1000s of PERFECT tiles for the best fit, then fill (recommended)</option>
-          <option value="redraw">C · Reshape MY tile's pattern to the figure, then re-draw it in</option>
-          <option value="outline">A · Keep MY tile → fill with a creature posed to fit it</option>
-          <option value="interlock">B · New creature → reshape tile + warp (gapless, 1 call)</option>
-          <option value="ref">R · Reference image → redraw THAT character into my tile</option>
-          <option value="creature">Free creature → stamp (flock / wallpaper)</option>
-        </select>
-        <select id="aiQuality">
-          <option value="low">low · cheapest</option>
-          <option value="medium">medium</option>
-          <option value="high" selected>high · best</option>
-        </select>
-        <button class="act primary" id="aiAutoBtn" style="margin:0;white-space:nowrap">⚡ Generate &amp; fill</button>
-      </div>
-      <div class="aiAutoRow" id="aiRefRow">
-        <button class="act" id="aiRefBtn" style="margin:0;white-space:nowrap">📎 Reference image…</button>
-        <span id="aiRefStatus" class="aiHint" style="flex:1;align-self:center">Attach an image, then <b>★ Auto</b> matches a perfect tile to it (or <b>R</b> fills your current tile with it). <i>none loaded</i></span>
-        <button class="act" id="aiRefClear" style="margin:0;display:none;white-space:nowrap">✕</button>
-      </div>
-      <div id="aiProg" style="display:none;height:7px;border-radius:5px;background:#1c1f26;border:1px solid var(--line);overflow:hidden;margin:2px 0 4px">
-        <div id="aiProgFill" style="height:100%;width:0%;background:linear-gradient(90deg,#3a6ea5,#6ea8fe);transition:width .25s ease"></div>
-      </div>
-      <div class="aiHint" id="aiAutoStatus"><b>A · Keep my tile:</b> draws a creature posed to fit your current tile, fills it gap-free. <b>B · New creature:</b> draws a creature and reshapes the tile to it. Uses <b>gpt-image-1</b> (~$0.02–0.17).</div>
-      <div id="aiResult" style="display:none">
-        <div class="aiResRow">
-          <div class="aiResCol"><canvas id="aiCreaturePrev" width="150" height="150" class="prevc"></canvas><div class="aiHint">what the AI drew</div></div>
-          <div class="aiResCol"><canvas id="aiTilePrev" width="230" height="150" class="prevc"></canvas><div class="aiHint">how it tiles</div></div>
+    <div id="aiWiz">
+      <!-- STEP 1 · choose -->
+      <div class="wizStep" data-step="1">
+        <div class="wizTitle">How do you want to start?</div>
+        <div class="wizChoices">
+          <button class="wizCard" id="wizChoosePrompt"><div class="ic">✍️</div><div class="t">Describe an idea</div><div class="s">type what to draw</div></button>
+          <button class="wizCard" id="wizChooseImage"><div class="ic">🖼️</div><div class="t">Use my image</div><div class="s">drop or pick a picture</div></button>
         </div>
-        <div class="aiAutoRow" style="margin-top:8px">
-          <button class="act" id="aiGapBtn" style="margin:0;white-space:nowrap" title="Ask the AI to grow the figure's hair / cape / limbs into any leftover empty space inside the tile. Click again to fill more.">🩹 Fill white space</button>
-          <span class="aiHint" style="flex:1;align-self:center">Extends the figure into leftover gaps (repeatable).</span>
-        </div>
-        <div class="aiHint">Good? <b>Close</b> to use it. Not quite? Edit the prompt and <b>Generate</b> again, or <b>Fill white space</b> to grow the figure into the gaps.</div>
+        <div class="wizKeyRow"><label>OpenAI key</label><input id="aiKey" class="wizField" type="password" placeholder="sk-… (stored only in this browser)" autocomplete="off" style="margin:0"></div>
       </div>
-    </div>
-    <div class="aiOr">— or do it by hand with ChatGPT —</div>
 
-    <p class="aiP">Turn this tile into a picture with any image AI, then drop the result back in. It’s re-clipped to your exact shape, so it always fits the tiling.</p>
-    <div class="aiGrid">
-      <div class="aiStep">
-        <div class="aiNum">1 · Export the shape</div>
-        <canvas id="aiPreview" width="200" height="200"></canvas>
-        <button class="act" id="aiDownload">⬇ Download shape PNG</button>
-        <div class="aiHint">Transparent PNG, white = the tile region.</div>
+      <!-- STEP 2a · prompt -->
+      <div class="wizStep" data-step="2a" style="display:none">
+        <div class="wizTitle">✍️ What should the creature be?</div>
+        <input id="aiSubjectA" class="wizField" placeholder="e.g. a koi fish · a barn owl · a bat · a beetle">
+        <div class="wizHint">Compact, bold subjects tile best (fish, bird, bat, leaf, beetle, hand). Long thin things fit worse.</div>
+        <div class="wizNav"><button class="act" data-goto="1">← Back</button><button class="act primary" id="wizGoPrompt">Generate →</button></div>
       </div>
-      <div class="aiStep">
-        <div class="aiNum">2 · Prompt the AI</div>
-        <textarea id="aiPrompt" spellcheck="false"></textarea>
-        <input id="aiSubject" placeholder="what should it be? e.g. a koi fish, a barn owl, a dragon">
-        <button class="act" id="aiCopy">📋 Copy prompt</button>
+
+      <!-- STEP 2b · image -->
+      <div class="wizStep" data-step="2b" style="display:none">
+        <div class="wizTitle">🖼️ Use your own image</div>
+        <div id="wizDrop">Drop an image here, or click to choose<br><span style="font-size:11px">a cutout or plain-background picture works best</span></div>
+        <input id="wizName" class="wizField" placeholder="name it (optional) — e.g. anime girl, my logo">
+        <div class="wizHint">We read your image's outline, find the best-matching perfect tile, then redraw it to fit. An opaque background is removed automatically.</div>
+        <div class="wizNav"><button class="act" data-goto="1">← Back</button><button class="act primary" id="wizGoImage" disabled>Generate →</button></div>
       </div>
-      <div class="aiStep">
-        <div class="aiNum">3 · Bring it back</div>
-        <div class="aiHint">Upload the image the AI made. It’ll fill every tile, clipped to fit.</div>
-        <button class="act primary" id="aiImport">⬆ Import AI image</button>
-        <button class="act" id="aiFitShape" title="Reshape the tile to the imported creature's silhouette and warp it to fill — true interlock (needs a transparent background)">🧩 Fit tile to image (interlock)</button>
-        <div class="aiHint">Reshapes the tile to the creature's outline → editable interlocking tile. Needs a <b>transparent background</b>.</div>
-        <label class="chk" style="margin-top:10px"><input type="checkbox" id="aiUse"> Use AI image as fill</label>
-        <div class="aiHint" style="margin-top:10px">Fit the picture into the tile (fills gaps):</div>
-        <div class="row"><label>zoom</label><input type="range" id="aiZoom" min="0.5" max="2.6" step="0.02" value="1"></div>
-        <div class="row"><label>nudge ↔</label><input type="range" id="aiOffX" min="-0.5" max="0.5" step="0.01" value="0"></div>
-        <div class="row"><label>nudge ↕</label><input type="range" id="aiOffY" min="-0.5" max="0.5" step="0.01" value="0"></div>
-        <div class="row"><label>gap / water colour</label><input type="color" id="gapColor" value="#15706b"></div>
-        <label class="chk" style="margin-top:6px"><input type="checkbox" id="blendWhite"> Blend light areas into gap colour</label>
-        <div class="row"><label>light threshold</label><input type="range" id="blendAmt" min="120" max="252" step="4" value="205"></div>
-        <label class="chk" style="margin-top:6px"><input type="checkbox" id="stampMode"> Stamp mode — repeat the whole image (don't clip to tile)</label>
-        <button class="act" id="aiCell">⬇ Tile-cell to fill (kill gaps)</button>
-        <div class="aiHint">For a <b>gapless</b> result: download this, ask the AI to fill all the gray with the creature, re-import, and turn Stamp <i>off</i>.</div>
-        <button class="act" id="aiRemove">Remove image</button>
-        <div class="aiHint" id="aiStatus">No image loaded.</div>
+
+      <!-- STEP 3 · generating -->
+      <div class="wizStep" data-step="3" style="display:none">
+        <div class="wizTitle">✨ Building your tessellation…</div>
+        <div id="aiProg" style="height:9px;border-radius:5px;background:#1c1f26;border:1px solid var(--line);overflow:hidden;margin:10px 0">
+          <div id="aiProgFill" style="height:100%;width:0%;background:linear-gradient(90deg,#3a6ea5,#6ea8fe);transition:width .25s ease"></div>
+        </div>
+        <div class="aiHint" id="aiAutoStatus">Working…</div>
+        <div class="wizHint">Drawing the figure → searching ~1000 perfect tiles for the best fit → filling it in. About 30–60s.</div>
+        <div class="wizNav"><button class="act" id="wizCancel" data-goto="1">← Back</button><span></span></div>
+      </div>
+
+      <!-- STEP 4 · result -->
+      <div class="wizStep" data-step="4" style="display:none">
+        <div class="wizTitle">✓ Your tessellation</div>
+        <div id="aiResult">
+          <canvas id="aiBigTile" width="640" height="440"></canvas>
+          <div class="aiResRow" style="justify-content:center;margin-top:10px">
+            <div class="aiResCol"><canvas id="aiCreaturePrev" width="130" height="130" class="prevc"></canvas><div class="aiHint">what the AI drew</div></div>
+            <div class="aiResCol"><canvas id="aiTilePrev" width="200" height="130" class="prevc"></canvas><div class="aiHint">how it tiles</div></div>
+          </div>
+        </div>
+        <div class="wizHint">Leftover empty space? <b>🩹 Fill white space</b> grows the figure's hair/limbs into it (repeatable).</div>
+        <div class="wizNav">
+          <button class="act" id="aiGapBtn">🩹 Fill white space</button>
+          <span style="display:flex;gap:10px"><button class="act" id="wizAgain">↻ Start over</button><button class="act primary" id="wizUse">✓ Use it</button></span>
+        </div>
       </div>
     </div>
-    <div class="aiHint" style="margin-top:12px;line-height:1.6">
-      <b>Tips for a clean fit:</b> tell the AI to <b>fill the whole shape and bleed past every edge</b> (gaps inside the outline become holes when tiled) · keep the output <b>square / same size</b> · <b>don’t change the shape</b> between export and import (Save the design first if unsure) · in rotation/glide patterns the picture will appear rotated/mirrored across tiles — that’s the Escher effect.
-    </div>
+
+    <details id="aiAdvanced">
+      <summary>Advanced options &amp; manual ChatGPT flow</summary>
+      <!-- hidden controls the pipeline needs (mode fixed to Auto, quality high) -->
+      <div style="display:none">
+        <select id="aiMode">
+          <option value="auto" selected>auto</option><option value="redraw">redraw</option><option value="outline">outline</option>
+          <option value="interlock">interlock</option><option value="ref">ref</option><option value="creature">creature</option>
+        </select>
+        <select id="aiQuality"><option value="low">low</option><option value="medium">medium</option><option value="high" selected>high</option></select>
+        <button id="aiAutoBtn">gen</button>
+        <button id="aiRefBtn">ref</button><button id="aiRefClear">x</button><span id="aiRefStatus"></span>
+      </div>
+      <div class="row"><label>output quality</label>
+        <select id="aiQualityUI" class="tbsel"><option value="low">low · cheapest</option><option value="medium">medium</option><option value="high" selected>high · best</option></select></div>
+      <label class="chk" style="margin-top:8px"><input type="checkbox" id="aiUse" checked> Use AI image as fill</label>
+      <div class="row"><label>fit zoom</label><input type="range" id="aiZoom" min="0.5" max="2.6" step="0.02" value="1"></div>
+      <div class="row"><label>nudge ↔</label><input type="range" id="aiOffX" min="-0.5" max="0.5" step="0.01" value="0"></div>
+      <div class="row"><label>nudge ↕</label><input type="range" id="aiOffY" min="-0.5" max="0.5" step="0.01" value="0"></div>
+      <div class="row"><label>gap / water colour</label><input type="color" id="gapColor" value="#15706b"></div>
+      <label class="chk" style="margin-top:6px"><input type="checkbox" id="blendWhite"> Blend light areas into gap colour</label>
+      <div class="row"><label>light threshold</label><input type="range" id="blendAmt" min="120" max="252" step="4" value="205"></div>
+      <label class="chk" style="margin-top:6px"><input type="checkbox" id="stampMode"> Stamp mode — repeat the whole image (don't clip to tile)</label>
+      <div class="aiOr" style="margin:14px 0 8px">— or do it by hand with ChatGPT —</div>
+      <div class="aiGrid">
+        <div class="aiStep">
+          <div class="aiNum">1 · Export the shape</div>
+          <canvas id="aiPreview" width="200" height="200"></canvas>
+          <button class="act" id="aiDownload">⬇ Download shape PNG</button>
+        </div>
+        <div class="aiStep">
+          <div class="aiNum">2 · Prompt the AI</div>
+          <textarea id="aiPrompt" spellcheck="false"></textarea>
+          <input id="aiSubject" placeholder="what should it be?">
+          <button class="act" id="aiCopy">📋 Copy prompt</button>
+        </div>
+        <div class="aiStep">
+          <div class="aiNum">3 · Bring it back</div>
+          <button class="act primary" id="aiImport">⬆ Import AI image</button>
+          <button class="act" id="aiFitShape">🧩 Fit tile to image</button>
+          <button class="act" id="aiCell">⬇ Tile-cell to fill</button>
+          <button class="act" id="aiRemove">Remove image</button>
+          <div class="aiHint" id="aiStatus">No image loaded.</div>
+        </div>
+      </div>
+    </details>
   </div>
 </div>
 
@@ -1946,8 +1992,47 @@ function openAI(){
   document.getElementById('aiUse').checked=useTexture;
   document.getElementById('aiKey').value=localStorage.getItem('tess_openai_key')||'';
   aiStatusText();
+  wizStep('1');                                  // always start the wizard at the choice screen
 }
 function closeAI(){ document.getElementById('aiModal').classList.remove('show'); }
+// ---- step-by-step wizard ----
+function wizStep(step){ document.querySelectorAll('#aiWiz .wizStep').forEach(s=>{ s.style.display = (s.dataset.step===step)?'':'none'; }); }
+function wizDrawBigTile(){ const c=document.getElementById('aiBigTile'); if(!c) return; const x=c.getContext('2d');
+  x.clearRect(0,0,c.width,c.height); try{ x.drawImage(cv,0,0,c.width,c.height); }catch(e){} }
+async function wizRun(){                          // run the pipeline, then show result or stay on error
+  document.getElementById('aiMode').value='auto';
+  wizStep('3');
+  await autoFill();
+  const ok=(document.getElementById('aiAutoStatus').textContent||'').trim().startsWith('✓');
+  if(ok){ wizDrawBigTile(); wizStep('4'); }      // else stay on step 3 with the error message
+}
+document.getElementById('wizChoosePrompt').addEventListener('click',()=>{ aiRefURL=null; aiRefFile=null; wizStep('2a'); document.getElementById('aiSubjectA').focus(); });
+document.getElementById('wizChooseImage').addEventListener('click',()=>wizStep('2b'));
+document.querySelectorAll('#aiWiz [data-goto]').forEach(b=>b.addEventListener('click',()=>wizStep(b.dataset.goto)));
+document.getElementById('wizGoPrompt').addEventListener('click',()=>{
+  if(!document.getElementById('aiKey').value.trim()){ document.getElementById('aiAutoStatus').textContent='⚠ Enter your OpenAI key on the first screen.'; wizStep('3'); return; }
+  aiRefURL=null; aiRefFile=null; wizRun();
+});
+document.getElementById('wizGoImage').addEventListener('click',()=>{
+  if(!aiRefFile) return;
+  document.getElementById('aiSubjectA').value=document.getElementById('wizName').value||'';
+  wizRun();
+});
+document.getElementById('wizAgain').addEventListener('click',()=>wizStep('1'));
+document.getElementById('wizUse').addEventListener('click',closeAI);
+// image drop / pick on step 2b
+function wizSetImage(file){ if(!file) return; aiRefFile=file; const r=new FileReader();
+  r.onload=()=>{ aiRefURL=r.result; const d=document.getElementById('wizDrop'); d.classList.add('has'); d.innerHTML='<img src="'+aiRefURL+'">';
+    document.getElementById('wizGoImage').disabled=false; }; r.readAsDataURL(file); }
+(function(){ const d=document.getElementById('wizDrop');
+  d.addEventListener('click',()=>{ const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
+    inp.onchange=()=>wizSetImage(inp.files[0]); inp.click(); });
+  d.addEventListener('dragover',e=>{ e.preventDefault(); d.classList.add('hot'); });
+  d.addEventListener('dragleave',()=>d.classList.remove('hot'));
+  d.addEventListener('drop',e=>{ e.preventDefault(); d.classList.remove('hot'); const f=e.dataTransfer.files&&e.dataTransfer.files[0]; if(f&&f.type.startsWith('image/')) wizSetImage(f); });
+})();
+// keep the visible advanced quality selector in sync with the real one
+(function(){ const ui=document.getElementById('aiQualityUI'); if(ui) ui.addEventListener('change',()=>{ document.getElementById('aiQuality').value=ui.value; }); })();
 // one-click auto-fill via the OpenAI image API (browser-direct; CORS-enabled)
 async function autoFill(){
   const status=document.getElementById('aiAutoStatus');
@@ -2197,6 +2282,7 @@ async function fillGaps(){
       buildProcessedTex(); draw();
       const tprev=document.getElementById('aiTilePrev'); if(tprev){ const tx=tprev.getContext('2d'); tx.clearRect(0,0,tprev.width,tprev.height); tx.drawImage(cv,0,0,tprev.width,tprev.height); }
       const cprev=document.getElementById('aiCreaturePrev'); if(cprev){ const cx=cprev.getContext('2d'); cx.clearRect(0,0,cprev.width,cprev.height); cx.fillStyle='#cfd6e0'; cx.fillRect(0,0,cprev.width,cprev.height); cx.drawImage(texImage,0,0,cprev.width,cprev.height); }
+      if(typeof wizDrawBigTile==='function') wizDrawBigTile();
       setProg(1); setTimeout(()=>progShow(false),700);
       status.textContent='✓ Filled the gaps. Click 🩹 again to fill any that remain.';
     });
@@ -2424,7 +2510,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 32 (2026-07-01)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 33 (2026-07-01)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
