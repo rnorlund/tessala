@@ -376,6 +376,7 @@
       </div>
       <div class="row"><label>output quality</label>
         <select id="aiQualityUI" class="tbsel"><option value="low">low · cheapest</option><option value="medium">medium</option><option value="high" selected>high · best</option></select></div>
+      <label class="chk" style="margin-top:8px"><input type="checkbox" id="localRedraw" checked> Local finish: <b>redraw into tile</b> (true gap-free interlock) — uncheck to <b>warp&nbsp;+&nbsp;fill</b> (keeps your exact source image, may leave gaps)</label>
       <label class="chk" style="margin-top:8px"><input type="checkbox" id="aiUse" checked> Use AI image as fill</label>
       <div class="row"><label>fit zoom</label><input type="range" id="aiZoom" min="0.5" max="2.6" step="0.02" value="1"></div>
       <div class="row"><label>nudge ↔</label><input type="range" id="aiOffX" min="-0.5" max="0.5" step="0.01" value="0"></div>
@@ -2133,16 +2134,40 @@ async function wizRunLocal(subject){
   try{
     status.textContent='🖥️ Rendering locally on your Mac… (first run loads the model — can be slow)';
     const model=document.getElementById('wizModel').value;
+    const redraw=document.getElementById('localRedraw').checked;   // default: redraw into tile (true interlock)
     lastGenSource='local'; lastGenModel=model; lastGenSubject=subject;
     const dataURL=await comfyTxt2Img(subject, model);
-    status.textContent='🔎 Seeding + tuning perfect tiles to match…'; setProg(0.5);
-    const src=await loadImg(dataURL), sil=await prepSilhouette(src);
-    const cont=alphaContour(sil,1024); if(!cont) throw new Error('Could not read a silhouette from the render — try a bolder subject.');
-    const fit=await searchBestTile(resampleClosed(cont,240),{progBase:0.5,progTop:0.9}); if(!fit) throw new Error('No fitting tile found.');
-    setPattern(fit.type); edgePts=cloneEp(fit.ep); texFrame=computeTexFrame(buildOutline());
-    const warped=escherWarp(src);           // fill the tile with the local creature (no cloud)
+    status.textContent='🔎 Seeding + tuning perfect tiles to match…'; setProg(0.45);
+    let src=await loadImg(dataURL), got=await readSil(src);
+    if(!got){                                                   // one render can be hard to isolate — try once more
+      status.textContent='↻ That render was hard to isolate — drawing one more…';
+      src=await loadImg(await comfyTxt2Img(subject, model)); got=await readSil(src);
+    }
+    if(!got) throw new Error('Could not read a clear silhouette after two tries — try a bolder, simpler subject.');
+    const sil=got.sil, cont=got.cont;
+    const fit=await searchBestTile(resampleClosed(cont,240),{progBase:0.45,progTop:0.72}); if(!fit) throw new Error('No fitting tile found.');
+    setPattern(fit.type);                                          // best-fit symmetry family
+    let resURL;
+    if(redraw){
+      // ── B · REDRAW (default): reshape the tile to the silhouette, then RE-DRAW the subject to fill that exact tile.
+      //    No warp, no source pixels bled in → the figure fills every pixel → true gap-free interlock.
+      if(!escherFit(sil,1024)) edgePts=cloneEp(fit.ep);            // fall back to the searched simple tile if the trace fails
+      texFrame=computeTexFrame(buildOutline());
+      status.textContent='🎨 Re-drawing '+subject+' into the tile… (20–50s)'; setProg(0.78);
+      const RES=1024;
+      const mk=document.createElement('canvas'); mk.width=mk.height=RES; const mc=mk.getContext('2d');
+      mc.fillStyle='#000'; mc.fillRect(0,0,RES,RES); paintShape(mc, texFrame, RES, {fill:'#ffffff'});   // white = draw here
+      const base=document.createElement('canvas'); base.width=base.height=RES; const bx=base.getContext('2d');
+      bx.fillStyle='#ffffff'; bx.fillRect(0,0,RES,RES);            // opaque white base for the inpaint
+      resURL=await comfyInpaint(base.toDataURL('image/png'), mk.toDataURL('image/png'), subject, model, 1.0);
+    }else{
+      // ── A · WARP + FILL: keep the EXACT source image; reshape tile to it and warp the source pixels in.
+      //    Faithful to the render, but its own light areas read as gaps → use 🩹 Fill to grow them closed.
+      edgePts=cloneEp(fit.ep); texFrame=computeTexFrame(buildOutline());
+      resURL=escherWarp(src)||dataURL;
+    }
     pushUndo();
-    loadTexFromURL(warped||dataURL, ()=>{
+    loadTexFromURL(resURL, ()=>{
       useTexture=true; document.getElementById('aiUse').checked=true; document.getElementById('stampMode').checked=false;
       texZoom=1.0; document.getElementById('aiZoom').value=1.0; tool='pan';
       document.querySelectorAll('.tool').forEach(x=>x.classList.toggle('on', x.dataset.tool==='pan'));
@@ -2152,7 +2177,9 @@ async function wizRunLocal(subject){
       const tprev=document.getElementById('aiTilePrev'); if(tprev){const tx=tprev.getContext('2d');tx.clearRect(0,0,tprev.width,tprev.height);tx.drawImage(cv,0,0,tprev.width,tprev.height);}
       document.getElementById('aiResult').style.display=''; setProg(1); setTimeout(()=>progShow(false),700);
       wizDrawBigTile(); wizStep('4');
-      status.textContent='✓ Made locally (pattern: '+pat.type+'). 🩹 Fill white space needs ChatGPT; local fill is the warp.';
+      status.textContent=redraw
+        ? '✓ Made locally — redrawn into the tile (true interlock, pattern: '+pat.type+'). Gap-free.'
+        : '✓ Made locally — warped (exact source, pattern: '+pat.type+'). Click 🩹 to grow it into any white gaps.';
     });
   }catch(err){ progStop(); progShow(false); status.textContent='✗ '+err.message; }
   btn.disabled=false;
@@ -2351,6 +2378,29 @@ async function prepSilhouette(img){
     if(chosen){ for(let i=0;i<RES*RES;i++) if(chosen[i]) D[i*4+3]=0; x.putImageData(d,0,0); }
   }
   return loadImg(c.toDataURL('image/png'));
+}
+// Robust silhouette read: colour-flood strip, then luminance-flood fallbacks for pale subjects.
+// Rejects a full-frame square (means the background was never isolated). Returns {cont, sil} or null.
+async function readSil(img){
+  const RES=1024;
+  const check=(silImg)=>{ const c=alphaContour(silImg,RES); if(!c||c.length<12) return null;
+    let mnx=1e9,mny=1e9,mxx=-1e9,mxy=-1e9; for(const p of c){ if(p.x<mnx)mnx=p.x; if(p.y<mny)mny=p.y; if(p.x>mxx)mxx=p.x; if(p.y>mxy)mxy=p.y; }
+    return ((mxx-mnx)*(mxy-mny))/(RES*RES) > 0.985 ? null : c; };   // full-frame square = bg not removed
+  let sil=await prepSilhouette(img); let c=check(sil); if(c) return {cont:c, sil};
+  for(const L of [232,218,205]){                                    // luminance strip: peel border-connected near-white
+    const cv=document.createElement('canvas'); cv.width=cv.height=RES; const x=cv.getContext('2d');
+    x.drawImage(img,0,0,RES,RES); const d=x.getImageData(0,0,RES,RES), D=d.data;
+    const vis=new Uint8Array(RES*RES), st=[];
+    const bright=p=>{ const r=D[p*4],g=D[p*4+1],b=D[p*4+2]; return Math.min(r,g,b)>L-30 && (r+g+b)>3*L; };
+    for(let px=0;px<RES;px++){ st.push(px); st.push((RES-1)*RES+px); }
+    for(let py=0;py<RES;py++){ st.push(py*RES); st.push(py*RES+RES-1); }
+    while(st.length){ const p=st.pop(); if(vis[p]||!bright(p)) continue; vis[p]=1; const px=p%RES,py=(p/RES)|0;
+      if(px>0)st.push(p-1); if(px<RES-1)st.push(p+1); if(py>0)st.push(p-RES); if(py<RES-1)st.push(p+RES); }
+    let removed=0; for(let i=0;i<RES*RES;i++) if(vis[i]){ D[i*4+3]=0; removed++; }
+    const kept=1-removed/(RES*RES); if(kept<0.03 || removed<RES*RES*0.02) continue;   // ate everything / nothing
+    x.putImageData(d,0,0); sil=await loadImg(cv.toDataURL('image/png')); c=check(sil); if(c) return {cont:c, sil};
+  }
+  return null;
 }
 // Auto-Escherize from an IMPORTED image: match ~1000 perfect tiles to its silhouette,
 // then redraw that character into the winner (multi-image edit). + Fill white space after.
@@ -2679,7 +2729,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 35 (2026-07-01)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 36 (2026-07-01)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
