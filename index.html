@@ -257,7 +257,12 @@
     <button class="act" id="btnClearDraw">Clear drawing</button>
     <div class="act" style="display:flex;align-items:center;gap:8px;cursor:default">curve / smoothness
       <input type="range" id="curveMain" min="0" max="2" step="0.05" value="1.3" style="flex:1" title="edge curvature — higher = smoother, rounder shapes"></div>
-    <button class="act" id="btnPng">Export PNG</button>
+    <div class="act" style="display:flex;align-items:center;gap:8px;cursor:default">
+      <button id="btnPng" style="all:unset;cursor:pointer;flex:1">Export PNG</button>
+      <select id="pngScale" title="Export resolution — higher = sharper, bigger file" style="cursor:pointer;background:#0c0f16;color:inherit;border:1px solid #2a3348;border-radius:6px;padding:2px 4px">
+        <option value="1">1×</option><option value="2">2×</option><option value="4" selected>4×</option><option value="8">8×</option>
+      </select></div>
+    <button class="act" id="btnFill" title="Grow the figure into any leftover white space (works after loading a saved design too)">🩹 Fill white space</button>
     <button class="act" id="btnShape" title="Download the tile outline as a transparent PNG to hand to ChatGPT">⬇ Tile shape PNG</button>
     <button class="act" id="btnSave">Save design</button>
     <button class="act" id="btnLoad">Load design</button>
@@ -311,6 +316,17 @@
         <div class="wizTitle" id="wizPromptTitle">✍️ What should it be?</div>
         <input id="aiSubjectA" class="wizField" placeholder="e.g. a koi fish · a barn owl · a bat · a beetle">
         <div class="wizHint">Compact, bold subjects tile best (fish, bird, bat, leaf, beetle, hand). Long thin things fit worse.</div>
+        <div class="row" style="margin-top:6px"><label>tile pattern</label>
+          <select id="wizSym" class="tbsel">
+            <option value="auto" selected>Auto — favour complex interlocks</option>
+            <option value="rot4">4-fold pinwheel (intricate)</option>
+            <option value="rot3">3-fold rosette (intricate)</option>
+            <option value="hexT">Hexagon</option>
+            <option value="rot2">2-fold</option>
+            <option value="glide">Glide row (simple)</option>
+            <option value="sqT">Square grid (simplest)</option>
+          </select></div>
+        <div class="wizHint">Auto leans toward rotational pinwheels (rot3/rot4) — the intricate Escher look. Force a pattern here to override; the figure warps to fit it.</div>
         <div id="wizLocalRow" style="display:none">
           <div class="row" style="margin-top:6px"><label>local model</label>
             <select id="wizModel" class="tbsel">
@@ -892,10 +908,24 @@ function centroid(pts){let x=0,y=0;for(const p of pts){x+=p.x;y+=p.y;}return{x:x
    Rendering
    ============================================================ */
 const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+let DPR = window.devicePixelRatio||1;   // effective backing scale; temporarily boosted for hi-res export
 function resize(){const r=document.getElementById('stage').getBoundingClientRect();
-  cv.width=r.width*devicePixelRatio; cv.height=r.height*devicePixelRatio;
+  DPR = window.devicePixelRatio||1;
+  cv.width=r.width*DPR; cv.height=r.height*DPR;
   cv.style.width=r.width+'px'; cv.style.height=r.height+'px';
-  ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0); draw();}
+  ctx.setTransform(DPR,0,0,DPR,0,0); draw();}
+// Render the current tiling view to a PNG at `scale`x the on-screen backing resolution.
+function renderToDataURL(scale){
+  const oldW=cv.width, oldH=cv.height, oldDPR=DPR;
+  const Wlog=oldW/oldDPR, Hlog=oldH/oldDPR;
+  DPR = oldDPR*scale;
+  cv.width = Math.round(Wlog*DPR); cv.height = Math.round(Hlog*DPR);
+  draw();
+  const url = cv.toDataURL('image/png');
+  DPR = oldDPR; cv.width = oldW; cv.height = oldH;
+  ctx.setTransform(DPR,0,0,DPR,0,0); draw();
+  return url;
+}
 window.addEventListener('resize',resize);
 
 function screenMat(W,H){ return [scale,0,0,scale, W/2+pan.x, H/2+pan.y]; }
@@ -907,7 +937,7 @@ function pathPoly(c, pts){
   c.closePath();
 }
 function draw(){
-  const W=cv.width/devicePixelRatio, H=cv.height/devicePixelRatio;
+  const W=cv.width/DPR, H=cv.height/DPR;
   ctx.clearRect(0,0,W,H);
   const outline=buildOutline();
   const baseCen=centroid(outline);
@@ -933,7 +963,7 @@ function draw(){
       const fc={x:texFrame.x+texFrame.w/2, y:texFrame.y+texFrame.h/2};
       const sz=texFrame.w*texZoom;
       const fx=fc.x-sz/2 + texOffX*texFrame.w, fy=fc.y-sz/2 + texOffY*texFrame.h;
-      const m=M.mul(full,[sz,0,0,sz,fx,fy]), d=devicePixelRatio;
+      const m=M.mul(full,[sz,0,0,sz,fx,fy]), d=DPR;
       ctx.globalAlpha=(dimOthers&&!isBase)?0.35:1;
       ctx.setTransform(d*m[0],d*m[1],d*m[2],d*m[3],d*m[4],d*m[5]);
       ctx.drawImage(texProcessed||texImage,0,0,1,1);
@@ -965,7 +995,7 @@ function draw(){
       const fx=fc.x-sz/2 + texOffX*texFrame.w, fy=fc.y-sz/2 + texOffY*texFrame.h;
       const localFromImg=[sz,0,0,sz,fx,fy];
       const m=M.mul(full, localFromImg);                 // image unit-square -> screen
-      const d=devicePixelRatio;
+      const d=DPR;
       ctx.setTransform(d*m[0],d*m[1],d*m[2],d*m[3],d*m[4],d*m[5]);
       ctx.drawImage(texProcessed||texImage,0,0,1,1);
       ctx.setTransform(d,0,0,d,0,0);                      // back to base transform
@@ -998,7 +1028,7 @@ function draw(){
   if(tool==='shape' && texImage && texFrame && document.getElementById('traceImg') && document.getElementById('traceImg').checked){
     ctx.save();
     const lf=[texFrame.w,0,0,texFrame.h,texFrame.x,texFrame.y];
-    const m=M.mul(S,lf), d=devicePixelRatio;
+    const m=M.mul(S,lf), d=DPR;
     ctx.globalAlpha=0.45;
     ctx.setTransform(d*m[0],d*m[1],d*m[2],d*m[3],d*m[4],d*m[5]);
     ctx.drawImage(texImage,0,0,1,1);
@@ -1300,9 +1330,27 @@ document.getElementById('btnReset').addEventListener('click',()=>{pushUndo();res
 document.getElementById('btnClearDraw').addEventListener('click',()=>{pushUndo();strokes=[];draw();});
 
 document.getElementById('btnPng').addEventListener('click',()=>{
-  const a=document.createElement('a');
-  a.download='tessellation.png'; a.href=cv.toDataURL('image/png'); a.click();
+  let scale=Math.max(1, +(document.getElementById('pngScale')||{}).value||1);
+  const base=Math.max(cv.width, cv.height);               // current backing max dimension
+  while(scale>1 && base*scale>10000) scale/=2;            // stay under browser canvas limits
+  const url = scale===1 ? cv.toDataURL('image/png') : renderToDataURL(scale);
+  const a=document.createElement('a'); a.download='tessellation.png'; a.href=url; a.click();
 });
+// Re-open the "fill white space" screen for the current design — including one just loaded from a .json.
+function reopenFill(){
+  if(!(texImage && useTexture && texFrame)){
+    alert('Make or load a tessellation with an image fill first — then 🩹 can grow it into any white space.'); return; }
+  openAI(); wizStep('4');
+  document.getElementById('aiResult').style.display='';
+  wizDrawBigTile();
+  const tprev=document.getElementById('aiTilePrev'); if(tprev){const tx=tprev.getContext('2d');tx.clearRect(0,0,tprev.width,tprev.height);try{tx.drawImage(cv,0,0,tprev.width,tprev.height);}catch(e){}}
+  const cprev=document.getElementById('aiCreaturePrev'); if(cprev&&texImage){const cx=cprev.getContext('2d');cx.clearRect(0,0,cprev.width,cprev.height);cx.fillStyle='#cfd6e0';cx.fillRect(0,0,cprev.width,cprev.height);try{cx.drawImage(texProcessed||texImage,0,0,cprev.width,cprev.height);}catch(e){}}
+  const st=document.getElementById('aiAutoStatus');
+  if(st) st.textContent = (lastGenSource==='local')
+    ? (lastGenModel ? '🩹 Ready — grows the figure into white space locally (ComfyUI).' : '⚠ This design was loaded without its local-model info — re-make it locally to enable 🩹 fill, or use the ChatGPT key.')
+    : '🩹 Ready — fills via ChatGPT (add your API key in Advanced if needed).';
+}
+document.getElementById('btnFill').addEventListener('click', reopenFill);
 document.getElementById('btnShape').addEventListener('click',()=>{
   // transparent PNG, white = the tile region — hand this to ChatGPT to fill the shape
   const a=document.createElement('a');
@@ -1317,6 +1365,7 @@ function snapshot(includeImage){
   const o={type:pat.type, edgePts:cloneEp(edgePts), strokes, curvature, useTexture, texFrame, texZoom, texOffX, texOffY,
     gapColor:gapColorVal(), blendWhite:document.getElementById('blendWhite').checked, blendAmt:val('blendAmt'),
     stampMode:document.getElementById('stampMode').checked,
+    lastGenSource, lastGenModel, lastGenSubject,        // so 🩹 Fill works after reload
     engine, advTypeIndex, advParams:advParams?advParams.slice():null,
     advEdges:advEdges?advEdges.map(a=>a?a.map(p=>({x:p.x,y:p.y})):[]):[],
     colors:{A:val('colA'),B:val('colB'),out:val('colOutline'),pen:val('colPen')}};
@@ -1363,6 +1412,8 @@ function loadState(s){
   document.getElementById('blendWhite').checked=!!s.blendWhite;
   if(s.blendAmt) document.getElementById('blendAmt').value=s.blendAmt;
   document.getElementById('stampMode').checked=!!s.stampMode;
+  if(s.lastGenSource) lastGenSource=s.lastGenSource;
+  lastGenModel=s.lastGenModel||''; lastGenSubject=s.lastGenSubject||'';
   texImage = null; texImageURL = null; texProcessed = null;
   if(s.texImageURL){ loadTexFromURL(s.texImageURL, ()=>{ buildProcessedTex(); draw(); }); }
   // engine state (advanced tactile tiles)
@@ -1984,12 +2035,13 @@ function shapeCostTo(outPts, target){                 // best cyclic+flip aligne
 // Async + yields so the progress bar stays live. Every candidate is a perfectly-tiling tile.
 async function searchBestTile(silPts, opts){
   opts=opts||{}; const N=48, target=_shapeTarget(silPts, N);
-  const types=opts.types||['sqT','rot2','rot3','rot4','hexT','glide'];
+  const forced=(typeof forcedSymTypes==='function') ? forcedSymTypes() : null;   // user override from the wizard
+  const types=opts.types || forced || ['sqT','rot2','rot3','rot4','hexT','glide'];
   const gopt={wild:0.34,detail:7,lobe:0.5,spike:0.22};
   const seedN=opts.seed||90, iters=opts.iters||2600, topK=opts.topK||3;
-  // Steer toward organic interlocks: penalise the "boring" axis-aligned squares (sqT/rot4),
-  // favour hex/tri/glide which interlock with more neighbours. Only flips near-ties (±few %).
-  const TYPEW={sqT:1.14, rot4:1.08, rot2:1.03, glide:1.00, hexT:0.94, rot3:0.95};
+  // Steer toward COMPLEX interlocks: rotational pinwheels (rot3/rot4/hex) interlock intricately even
+  // from simple silhouettes; sqT/glide/rot2 just make grids/rows. Nudge hard away from the grids.
+  const TYPEW={sqT:1.35, glide:1.28, rot2:1.12, hexT:0.95, rot4:0.85, rot3:0.82};
   const tw=t=>TYPEW[t]||1;
   const yield_=()=>new Promise(r=>setTimeout(r,0));
   const P0=(opts.progBase!=null)?opts.progBase:0.5, P1=(opts.progTop!=null)?opts.progTop:0.95;
@@ -2036,6 +2088,8 @@ function openAI(){
 function closeAI(){ document.getElementById('aiModal').classList.remove('show'); }
 // ---- step-by-step wizard ----
 function wizStep(step){ document.querySelectorAll('#aiWiz .wizStep').forEach(s=>{ s.style.display = (s.dataset.step===step)?'':'none'; }); }
+// null = auto (complexity-weighted search); else restrict the search to the one symmetry the user forced.
+function forcedSymTypes(){ const s=document.getElementById('wizSym'); return (!s||s.value==='auto') ? null : [s.value]; }
 function wizDrawBigTile(){ const c=document.getElementById('aiBigTile'); if(!c) return; const x=c.getContext('2d');
   x.clearRect(0,0,c.width,c.height); try{ x.drawImage(cv,0,0,c.width,c.height); }catch(e){} }
 async function wizRun(){                          // run the pipeline, then show result or stay on error
@@ -2733,7 +2787,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 37 (2026-07-01)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 38 (2026-07-01)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
