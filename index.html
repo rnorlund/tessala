@@ -319,6 +319,7 @@
         <div class="row" style="margin-top:6px"><label>tile pattern</label>
           <select id="wizSym" class="tbsel">
             <option value="auto" selected>Auto — favour complex interlocks</option>
+            <option value="current">★ My current tile — the one on screen (81-gallery / starter)</option>
             <option value="rot4">4-fold pinwheel (intricate)</option>
             <option value="rot3">3-fold rosette (intricate)</option>
             <option value="hexT">Hexagon</option>
@@ -1135,6 +1136,15 @@ const val=id=>document.getElementById(id).value;
 function mouse(e){const r=cv.getBoundingClientRect(); return {x:e.clientX-r.left, y:e.clientY-r.top};}
 function toLocal(sp){const W=cv.width/devicePixelRatio,H=cv.height/devicePixelRatio;
   return M.apply(M.inv(screenMat(W,H)), sp);}
+function pointInPoly(pt, poly){ let inside=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){ const xi=poly[i].x,yi=poly[i].y,xj=poly[j].x,yj=poly[j].y;
+    if(((yi>pt.y)!==(yj>pt.y)) && (pt.x < (xj-xi)*(pt.y-yi)/((yj-yi)||1e-9)+xi)) inside=!inside; }
+  return inside; }
+// Which tile instance does this model-space point fall in? (so pen strokes can be drawn on ANY tile,
+// not just the centre one — we fold them back into the base tile's frame so they tessellate.)
+function foldInstance(mp){ const W=cv.width/DPR, H=cv.height/DPR, out=buildOutline();
+  for(const Ti of instances(W,H)){ if(pointInPoly(M.apply(M.inv(Ti), mp), out)) return Ti; }
+  return M.id(); }
 function paramOnEdge(i, lp){ // t along straight corner_i->corner_i+1
   const c0=pat.corners[i], c1=pat.corners[(i+1)%pat.n];
   const dx=c1.x-c0.x, dy=c1.y-c0.y, len2=dx*dx+dy*dy;
@@ -1210,7 +1220,8 @@ cv.addEventListener('mousedown',e=>{
       drag=nearestHandle(sp, 26*26); }   // grab the just-added point so it tracks the drag
     return;
   }
-  if(tool==='draw'){ pushUndo(); curStroke={color:val('colPen'), w:parseFloat(val('penW')), pts:[lp]}; return; }
+  if(tool==='draw'){ pushUndo(); const ti=foldInstance(lp);      // draw on ANY tile; fold into its frame so it repeats
+    curStroke={color:val('colPen'), w:parseFloat(val('penW')), ti, pts:[M.apply(M.inv(ti), lp)]}; return; }
   if(tool==='erase'){ pushUndo(); eraseAt(lp); return; }
 });
 window.addEventListener('mousemove',e=>{
@@ -1227,7 +1238,7 @@ window.addEventListener('mousemove',e=>{
     sortOwner(drag.owner);                                  // reorder LIVE (not on release) so the curve
     drag.idx=edgePts[drag.owner].indexOf(np);               // never "snaps" when you cross a neighbour;
     draw(); return; }                                       // keep controlling the same point we grabbed
-  if(curStroke){ curStroke.pts.push(lp);
+  if(curStroke){ curStroke.pts.push(M.apply(M.inv(curStroke.ti||M.id()), lp));   // keep stroke in its start-tile frame
     if(curStroke.pts.length>1){ strokes.push(curStroke); draw(); strokes.pop(); }
     return; }
   if(tool==='erase' && e.buttons){ eraseAt(lp); }
@@ -2089,7 +2100,8 @@ function closeAI(){ document.getElementById('aiModal').classList.remove('show');
 // ---- step-by-step wizard ----
 function wizStep(step){ document.querySelectorAll('#aiWiz .wizStep').forEach(s=>{ s.style.display = (s.dataset.step===step)?'':'none'; }); }
 // null = auto (complexity-weighted search); else restrict the search to the one symmetry the user forced.
-function forcedSymTypes(){ const s=document.getElementById('wizSym'); return (!s||s.value==='auto') ? null : [s.value]; }
+function forcedSymTypes(){ const s=document.getElementById('wizSym'); if(!s) return null; const v=s.value;
+  return (v==='auto'||v==='current') ? null : [v]; }   // 'current' handled separately (fill into the on-screen tile)
 function wizDrawBigTile(){ const c=document.getElementById('aiBigTile'); if(!c) return; const x=c.getContext('2d');
   x.clearRect(0,0,c.width,c.height); try{ x.drawImage(cv,0,0,c.width,c.height); }catch(e){} }
 async function wizRun(){                          // run the pipeline, then show result or stay on error
@@ -2194,6 +2206,43 @@ async function wizRunLocal(subject){
     const model=document.getElementById('wizModel').value;
     const redraw=document.getElementById('localRedraw').checked;   // default: redraw into tile (true interlock)
     lastGenSource='local'; lastGenModel=model; lastGenSubject=subject;
+    const symVal=(document.getElementById('wizSym')||{}).value||'auto';
+
+    // ★ "My current tile" — fill the creature into the tile exactly as it is on screen: any of the 81
+    //    isohedral types (advanced engine), a symmetry starter, or a hand-edited tile. No search / reshape.
+    if(symVal==='current'){
+      texFrame=computeTexFrame(buildOutline());
+      const patName=(engine==='advanced'&&window.TACT)?('IH'+TACT.tilingTypes[advTypeIndex]):(pat?pat.type:'tile');
+      let resURL;
+      if(redraw){
+        status.textContent='🎨 Drawing '+subject+' into your chosen tile ('+patName+')… (20–50s)'; setProg(0.4);
+        const RES=1024;
+        const mk=document.createElement('canvas'); mk.width=mk.height=RES; const mc=mk.getContext('2d');
+        mc.fillStyle='#000'; mc.fillRect(0,0,RES,RES); paintShape(mc, texFrame, RES, {fill:'#ffffff'});
+        const base=document.createElement('canvas'); base.width=base.height=RES; const bx=base.getContext('2d');
+        bx.fillStyle='#ffffff'; bx.fillRect(0,0,RES,RES);
+        resURL=await comfyInpaint(base.toDataURL('image/png'), mk.toDataURL('image/png'), subject, model, 1.0);
+      }else{
+        status.textContent='🖥️ Rendering '+subject+' to warp into your tile ('+patName+')… (20–50s)'; setProg(0.3);
+        const src=await loadImg(await comfyTxt2Img(subject, model));
+        resURL=warpToCurrentTile(src); if(!resURL) throw new Error('Could not warp into this tile — try the redraw finish (Advanced).');
+      }
+      pushUndo();
+      loadTexFromURL(resURL, ()=>{
+        useTexture=true; document.getElementById('aiUse').checked=true; document.getElementById('stampMode').checked=false;
+        texZoom=1.0; document.getElementById('aiZoom').value=1.0; tool='pan';
+        document.querySelectorAll('.tool').forEach(x=>x.classList.toggle('on', x.dataset.tool==='pan'));
+        cv.style.cursor='grab'; document.getElementById('shapeHelp').style.display='none';
+        buildProcessedTex(); aiStatusText(); draw();
+        const cprev=document.getElementById('aiCreaturePrev'); if(cprev&&texImage){const cx=cprev.getContext('2d');cx.clearRect(0,0,cprev.width,cprev.height);cx.fillStyle='#cfd6e0';cx.fillRect(0,0,cprev.width,cprev.height);try{cx.drawImage(texProcessed||texImage,0,0,cprev.width,cprev.height);}catch(e){}}
+        const tprev=document.getElementById('aiTilePrev'); if(tprev){const tx=tprev.getContext('2d');tx.clearRect(0,0,tprev.width,tprev.height);try{tx.drawImage(cv,0,0,tprev.width,tprev.height);}catch(e){}}
+        document.getElementById('aiResult').style.display=''; setProg(1); setTimeout(()=>progShow(false),700);
+        wizDrawBigTile(); wizStep('4');
+        status.textContent='✓ Filled your chosen tile ('+patName+', '+(redraw?'redraw':'warp')+').';
+      });
+      btn.disabled=false; return;
+    }
+
     const dataURL=await comfyTxt2Img(subject, model);
     status.textContent='🔎 Seeding + tuning perfect tiles to match…'; setProg(0.45);
     let src=await loadImg(dataURL), got=await readSil(src);
@@ -2651,6 +2700,7 @@ function enterAdvanced(index){
   document.getElementById('advCtl').style.display='';
   document.getElementById('btnAdvanced').style.display='none';
   advTypeIndex=index; advParams=null; advEdges=[]; advBuild(); advUI();
+  const s=document.getElementById('wizSym'); if(s) s.value='current';   // AI fill now defaults to THIS chosen tile
 }
 function advGo(i){ advTypeIndex=((i%81)+81)%81; advParams=null; advEdges=[]; advBuild(); advUI(); draw(); }
 // ---- "Choose a tiling" gallery: live thumbnail of every isohedral type ----
@@ -2767,7 +2817,8 @@ function applyCreature(c){
     el.addEventListener('click',()=>{
       pushUndo();
       if(p.adv!==undefined){ enterAdvanced(p.adv); draw(); }
-      else { setPattern(p.t); setShape(p.tpl); draw(); }
+      else { setPattern(p.t); setShape(p.tpl); draw();
+        const s=document.getElementById('wizSym'); if(s) s.value='current'; }   // AI fill defaults to THIS starter
     });
     ig.appendChild(el);
   });
@@ -2787,7 +2838,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 38 (2026-07-01)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 39 (2026-07-01)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
