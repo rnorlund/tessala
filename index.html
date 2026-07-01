@@ -2041,6 +2041,7 @@ async function wizRun(){                          // run the pipeline, then show
   if(ok){ wizDrawBigTile(); wizStep('4'); }      // else stay on step 3 with the error message
 }
 let wizSrc='chatgpt';   // 'local' | 'chatgpt' | 'image'
+let lastGenSource='openai', lastGenModel='', lastGenSubject='';   // so 🩹 Fill uses the same engine that made the tile
 const comfyURL=()=>(localStorage.getItem('tess_comfy_url')||'http://127.0.0.1:8189').replace(/\/$/,'');
 function wizPrepPromptScreen(){
   const local=(wizSrc==='local');
@@ -2067,8 +2068,8 @@ document.getElementById('wizGoPrompt').addEventListener('click',()=>{
 // ---- LOCAL generation via ComfyUI (txt2img SDXL) — fully on-device, no cloud ----
 async function comfyTxt2Img(subject, model){
   const url=comfyURL(), pony=/pony/i.test(model);
-  const pos=(pony?'score_9, score_8_up, score_7_up, ':'')+subject+', single subject, centered, full body, bold graphic, thick clean outlines, high contrast, plain flat solid white background, studio';
-  const neg=(pony?'score_6, score_5, score_4, ':'')+'busy background, scenery, pattern, multiple subjects, border, frame, text, watermark, cropped, blurry';
+  const pos=(pony?'score_9, score_8_up, score_7_up, ':'')+'flat vector sticker of '+subject+', single subject centered filling the frame, bold flat solid colors, thick clean black outline, cel shaded, die-cut sticker, on a pure solid white background, no gradient, no shadow';
+  const neg=(pony?'score_6, score_5, score_4, ':'')+'photo, realistic, 3d, gradient, soft shading, drop shadow, busy background, scenery, pattern, multiple subjects, border, frame, text, watermark, cropped, blurry';
   const seed=Math.floor(Math.random()*1e15);
   const g={
     "4":{class_type:"CheckpointLoaderSimple",inputs:{ckpt_name:model}},
@@ -2079,19 +2080,52 @@ async function comfyTxt2Img(subject, model){
     "8":{class_type:"VAEDecode",inputs:{samples:["3",0],vae:["4",2]}},
     "9":{class_type:"SaveImage",inputs:{filename_prefix:"tess",images:["8",0]}}
   };
-  const cid='tess'+seed;
+  return comfyRun(g, {p0:0.1, p1:0.45});
+}
+function blobToDataURL(blob){ return new Promise(res=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.readAsDataURL(blob); }); }
+// POST a ComfyUI graph, poll /history, return the output image as a dataURL
+async function comfyRun(g, prog){
+  const url=comfyURL(), cid='tess'+Math.random().toString(36).slice(2);
   let pr; try{ pr=await fetch(url+'/prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:g,client_id:cid})}); }
-  catch(e){ throw new Error('Local ComfyUI not reachable at '+url+' — run ugi/start-comfy-cors.command (and it must allow CORS).'); }
-  if(!pr.ok) throw new Error('ComfyUI rejected the job (HTTP '+pr.status+').');
+  catch(e){ throw new Error('Local ComfyUI not reachable at '+url+' — run ugi/start-comfy-cors.command (it must allow CORS).'); }
+  if(!pr.ok){ let m; try{m=JSON.stringify((await pr.json()).error||'');}catch(e){m=''} throw new Error('ComfyUI rejected the job (HTTP '+pr.status+') '+m.slice(0,140)); }
   const pid=(await pr.json()).prompt_id;
-  for(let i=0;i<180;i++){ await new Promise(r=>setTimeout(r,1500));
+  for(let i=0;i<220;i++){ await new Promise(r=>setTimeout(r,1500));
     const h=await (await fetch(url+'/history/'+pid,{cache:'no-store'})).json();
     const rec=h[pid]; if(rec&&rec.outputs){ for(const nid in rec.outputs){ const im=rec.outputs[nid].images;
       if(im&&im.length){ const q=new URLSearchParams({filename:im[0].filename,subfolder:im[0].subfolder||'',type:im[0].type||'output'});
-        const blob=await (await fetch(url+'/view?'+q)).blob(); return await new Promise(res=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.readAsDataURL(blob);}); } } }
-    if(typeof setProg==='function') setProg(0.1+0.35*Math.min(1,i/40));
+        const blob=await (await fetch(url+'/view?'+q)).blob(); return blobToDataURL(blob); } } }
+    if(prog && typeof setProg==='function') setProg(prog.p0+(prog.p1-prog.p0)*Math.min(1,i/38));
   }
   throw new Error('Local render timed out.');
+}
+async function comfyUpload(dataURL, filename){
+  const blob=await (await fetch(dataURL)).blob(); const fd=new FormData();
+  fd.append('image', blob, filename||'up.png'); fd.append('overwrite','true');
+  const r=await fetch(comfyURL()+'/upload/image',{method:'POST',body:fd});
+  if(!r.ok) throw new Error('ComfyUI image upload failed (HTTP '+r.status+').');
+  const j=await r.json(); return j.name;
+}
+// local inpaint: baseURL painted image, maskWhiteURL (WHITE = regenerate) -> filled image
+async function comfyInpaint(baseURL, maskWhiteURL, subject, model, denoise){
+  const pony=/pony/i.test(model);
+  const baseName=await comfyUpload(baseURL,'tessbase.png'), maskName=await comfyUpload(maskWhiteURL,'tessmask.png');
+  const pos=(pony?'score_9, score_8_up, score_7_up, ':'')+'flat vector sticker of '+(subject||'the character')+', extend it to completely fill the shape, bold flat solid colors, thick clean black outline, cel shaded, no gradient, no shadow';
+  const neg=(pony?'score_6, score_5, ':'')+'photo, realistic, 3d, gradient, soft shadow, seam, gap, border, frame, text, watermark';
+  const seed=Math.floor(Math.random()*1e15);
+  const g={
+    "4":{class_type:"CheckpointLoaderSimple",inputs:{ckpt_name:model}},
+    "6":{class_type:"CLIPTextEncode",inputs:{text:pos,clip:["4",1]}},
+    "7":{class_type:"CLIPTextEncode",inputs:{text:neg,clip:["4",1]}},
+    "10":{class_type:"LoadImage",inputs:{image:baseName}},
+    "11":{class_type:"LoadImage",inputs:{image:maskName}},
+    "12":{class_type:"ImageToMask",inputs:{image:["11",0],channel:"red"}},
+    "13":{class_type:"VAEEncodeForInpaint",inputs:{pixels:["10",0],vae:["4",2],mask:["12",0],grow_mask_by:8}},
+    "3":{class_type:"KSampler",inputs:{seed,steps:22,cfg:6.5,sampler_name:"dpmpp_2m",scheduler:"karras",denoise:(denoise||1.0),model:["4",0],positive:["6",0],negative:["7",0],latent_image:["13",0]}},
+    "8":{class_type:"VAEDecode",inputs:{samples:["3",0],vae:["4",2]}},
+    "9":{class_type:"SaveImage",inputs:{filename_prefix:"tessip",images:["8",0]}}
+  };
+  return comfyRun(g, {p0:0.5, p1:0.9});
 }
 async function wizRunLocal(subject){
   const btn=document.getElementById('aiAutoBtn'); btn.disabled=true;
@@ -2099,6 +2133,7 @@ async function wizRunLocal(subject){
   try{
     status.textContent='🖥️ Rendering locally on your Mac… (first run loads the model — can be slow)';
     const model=document.getElementById('wizModel').value;
+    lastGenSource='local'; lastGenModel=model; lastGenSubject=subject;
     const dataURL=await comfyTxt2Img(subject, model);
     status.textContent='🔎 Seeding + tuning perfect tiles to match…'; setProg(0.5);
     const src=await loadImg(dataURL), sil=await prepSilhouette(src);
@@ -2151,6 +2186,7 @@ async function autoFill(){
   const subject=(document.getElementById('aiSubjectA').value || document.getElementById('aiSubject').value || 'animal').trim();
   const quality=document.getElementById('aiQuality').value;
   const mode=document.getElementById('aiMode').value;
+  lastGenSource='openai'; lastGenSubject=subject;
   if(mode==='auto' && aiRefFile) return autoFromImage(key, quality);   // Auto + attached image -> match tiles to YOUR image
   const btn=document.getElementById('aiAutoBtn'); btn.disabled=true;
   progShow(true); setProg(0.04);
@@ -2296,17 +2332,23 @@ async function prepSilhouette(img){
   const RES=1024, c=document.createElement('canvas'); c.width=c.height=RES; const x=c.getContext('2d');
   x.drawImage(img,0,0,RES,RES); const d=x.getImageData(0,0,RES,RES), D=d.data;
   let transp=0; for(let i=0;i<RES*RES;i++) if(D[i*4+3]<30) transp++;
-  if(transp < RES*RES*0.03){                                  // opaque bg -> remove it
+  if(transp < RES*RES*0.03){                                  // opaque bg -> flood-remove it from the borders
     const cor=[[2,2],[RES-3,2],[2,RES-3],[RES-3,RES-3]]; let br=0,bg=0,bb=0;
     for(const [px,py] of cor){ const i=(py*RES+px)*4; br+=D[i]; bg+=D[i+1]; bb+=D[i+2]; } br/=4;bg/=4;bb/=4;
-    const thr=64*64, vis=new Uint8Array(RES*RES), st=[];
-    const close=p=>{ const dr=D[p*4]-br,dg=D[p*4+1]-bg,db=D[p*4+2]-bb; return dr*dr+dg*dg+db*db<thr; };
-    for(let px=0;px<RES;px++){ st.push(px); st.push((RES-1)*RES+px); }
-    for(let py=0;py<RES;py++){ st.push(py*RES); st.push(py*RES+RES-1); }
-    while(st.length){ const p=st.pop(); if(vis[p]||!close(p)) continue; vis[p]=1; const px=p%RES,py=(p/RES)|0;
-      if(px>0)st.push(p-1); if(px<RES-1)st.push(p+1); if(py>0)st.push(p-RES); if(py<RES-1)st.push(p+RES); }
-    for(let i=0;i<RES*RES;i++) if(vis[i]) D[i*4+3]=0;
-    x.putImageData(d,0,0);
+    // adaptive threshold: strongest bg removal that still KEEPS a real subject (avoids eating light subjects on white)
+    let chosen=null;
+    for(const t of [40,30,22,15]){
+      const thr=t*t, vis=new Uint8Array(RES*RES), st=[];
+      const close=p=>{ const dr=D[p*4]-br,dg=D[p*4+1]-bg,db=D[p*4+2]-bb; return dr*dr+dg*dg+db*db<thr; };
+      for(let px=0;px<RES;px++){ st.push(px); st.push((RES-1)*RES+px); }
+      for(let py=0;py<RES;py++){ st.push(py*RES); st.push(py*RES+RES-1); }
+      let removed=0;
+      while(st.length){ const p=st.pop(); if(vis[p]||!close(p)) continue; vis[p]=1; removed++; const px=p%RES,py=(p/RES)|0;
+        if(px>0)st.push(p-1); if(px<RES-1)st.push(p+1); if(py>0)st.push(p-RES); if(py<RES-1)st.push(p+RES); }
+      const kept=1-removed/(RES*RES);
+      if(kept>0.05){ chosen=vis; break; }                     // kept a subject -> use this threshold
+    }
+    if(chosen){ for(let i=0;i<RES*RES;i++) if(chosen[i]) D[i*4+3]=0; x.putImageData(d,0,0); }
   }
   return loadImg(c.toDataURL('image/png'));
 }
@@ -2355,15 +2397,17 @@ async function autoFromImage(key, quality){
 // extend the figure (hair/cape/limbs/tail) into just those regions. Repeatable.
 async function fillGaps(){
   const status=document.getElementById('aiAutoStatus');
+  const local=(lastGenSource==='local');
   const key=document.getElementById('aiKey').value.trim();
-  if(!key){ status.textContent='⚠ Enter your OpenAI API key first.'; return; }
+  if(!local && !key){ status.textContent='⚠ Enter your OpenAI API key first (or make the tile with the Local model).'; return; }
   if(!texImage||!texFrame){ status.textContent='Generate or fill a tile first.'; return; }
   const btn=document.getElementById('aiGapBtn'); if(btn) btn.disabled=true;
-  progShow(true); setProg(0.08); progCreep(0.08,0.9,22);
+  progShow(true); setProg(0.08); if(!local) progCreep(0.08,0.9,22);
   try{
     const RES=1024;
     // current fill, drawn exactly as it appears (honouring texZoom / nudge)
     const fc=document.createElement('canvas'); fc.width=fc.height=RES; const fx=fc.getContext('2d');
+    if(local){ fx.fillStyle='#ffffff'; fx.fillRect(0,0,RES,RES); }   // opaque base for inpaint (no alpha)
     const z=texZoom||1, s=RES*z, dx=(RES-s)/2+(texOffX||0)*RES, dy=(RES-s)/2+(texOffY||0)*RES;
     fx.drawImage(texProcessed||texImage, dx,dy,s,s);
     const fdat=fx.getImageData(0,0,RES,RES).data;
@@ -2371,27 +2415,38 @@ async function fillGaps(){
     const shp=document.createElement('canvas'); shp.width=shp.height=RES;
     paintShape(shp.getContext('2d'), texFrame, RES, {fill:'#ffffff'});
     const sdat=shp.getContext('2d').getImageData(0,0,RES,RES).data;
-    // edit mask: transparent(0)=fill here (inside tile & empty), opaque(255)=keep
+    // OpenAI mask: transparent(0)=fill here.  ComfyUI mask: WHITE=fill here.
     const mk=document.createElement('canvas'); mk.width=mk.height=RES; const mc=mk.getContext('2d');
-    const mim=mc.createImageData(RES,RES), md=mim.data; let empty=0;
+    const mkW=document.createElement('canvas'); mkW.width=mkW.height=RES; const mcW=mkW.getContext('2d');
+    const mim=mc.createImageData(RES,RES), md=mim.data, wim=mcW.createImageData(RES,RES), wd=wim.data; let empty=0;
     for(let i=0;i<RES*RES;i++){ md[i*4]=md[i*4+1]=md[i*4+2]=255;
-      const inside=sdat[i*4+3]>10, filled=fdat[i*4+3]>30;
-      if(inside && !filled){ md[i*4+3]=0; empty++; } else md[i*4+3]=255; }
-    mc.putImageData(mim,0,0);
+      const inside=sdat[i*4+3]>10;
+      const filled = local ? (fdat[i*4]<250||fdat[i*4+1]<250||fdat[i*4+2]<250) : (fdat[i*4+3]>30);   // local base is white
+      const fill = inside && !filled;
+      md[i*4+3]= fill?0:255;
+      wd[i*4]=wd[i*4+1]=wd[i*4+2]= fill?255:0; wd[i*4+3]=255;
+      if(fill) empty++; }
+    mc.putImageData(mim,0,0); mcW.putImageData(wim,0,0);
     if(empty < RES*RES*0.004){ progStop(); progShow(false); status.textContent='✓ Tile is already full — no white space left.'; if(btn) btn.disabled=false; return; }
-    status.textContent='🩹 Growing the figure into the gaps… (10–35s)';
-    const imgBlob=await (await fetch(fc.toDataURL('image/png'))).blob();
-    const maskBlob=await (await fetch(mk.toDataURL('image/png'))).blob();
-    const fd=new FormData(); fd.append('model','gpt-image-1');
-    fd.append('image', imgBlob,'img.png'); fd.append('mask', maskBlob,'mask.png');
-    fd.append('prompt','Extend the existing character to completely fill the transparent regions — flow its hair, clothing/cape, limbs or tail into them so they reach every edge with no empty space. Match the existing flat colours, shading and thick clean black outlines exactly, as if one continuous drawing. Do not change anything already drawn.');
-    fd.append('size','1024x1024'); fd.append('quality', document.getElementById('aiQuality').value); fd.append('background','transparent'); fd.append('n','1');
-    const r=await fetch('https://api.openai.com/v1/images/edits',{method:'POST',headers:{Authorization:'Bearer '+key},body:fd});
+    status.textContent = local ? '🩹 Growing the figure into the gaps (local)… (20–50s)' : '🩹 Growing the figure into the gaps… (10–35s)';
+    let resURL;
+    if(local){
+      resURL = await comfyInpaint(fc.toDataURL('image/png'), mkW.toDataURL('image/png'), lastGenSubject, lastGenModel, 1.0);
+    } else {
+      const imgBlob=await (await fetch(fc.toDataURL('image/png'))).blob();
+      const maskBlob=await (await fetch(mk.toDataURL('image/png'))).blob();
+      const fd=new FormData(); fd.append('model','gpt-image-1');
+      fd.append('image', imgBlob,'img.png'); fd.append('mask', maskBlob,'mask.png');
+      fd.append('prompt','Extend the existing character to completely fill the transparent regions — flow its hair, clothing/cape, limbs or tail into them so they reach every edge with no empty space. Match the existing flat colours, shading and thick clean black outlines exactly, as if one continuous drawing. Do not change anything already drawn.');
+      fd.append('size','1024x1024'); fd.append('quality', document.getElementById('aiQuality').value); fd.append('background','transparent'); fd.append('n','1');
+      const r=await fetch('https://api.openai.com/v1/images/edits',{method:'POST',headers:{Authorization:'Bearer '+key},body:fd});
+      if(!r.ok){ let m; try{m=(await r.json()).error.message;}catch(e){m=await r.text();} throw new Error('HTTP '+r.status+' — '+(m||'').slice(0,150)); }
+      const j=await r.json(); const b64=j.data&&j.data[0]&&j.data[0].b64_json; if(!b64) throw new Error('No image returned.');
+      resURL='data:image/png;base64,'+b64;
+    }
     progStop(); setProg(0.95);
-    if(!r.ok){ let m; try{m=(await r.json()).error.message;}catch(e){m=await r.text();} throw new Error('HTTP '+r.status+' — '+(m||'').slice(0,150)); }
-    const j=await r.json(); const b64=j.data&&j.data[0]&&j.data[0].b64_json; if(!b64) throw new Error('No image returned.');
     pushUndo();
-    loadTexFromURL('data:image/png;base64,'+b64, ()=>{
+    loadTexFromURL(resURL, ()=>{
       texZoom=1.0; document.getElementById('aiZoom').value=1.0;   // it now fills to the edges
       buildProcessedTex(); draw();
       const tprev=document.getElementById('aiTilePrev'); if(tprev){ const tx=tprev.getContext('2d'); tx.clearRect(0,0,tprev.width,tprev.height); tx.drawImage(cv,0,0,tprev.width,tprev.height); }
@@ -2624,7 +2679,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 34 (2026-07-01)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 35 (2026-07-01)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
