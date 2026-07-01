@@ -1893,15 +1893,15 @@ function resampleClosed(pts, N){
   return out;
 }
 function centroidOf(p){ let x=0,y=0; for(const q of p){x+=q.x;y+=q.y;} return {x:x/p.length,y:y/p.length}; }
-// normalise points: centre + scale to unit RMS radius (for shape comparison)
-// centre + rotate to principal axis + scale -> so matching is rotation-aware (a figure at an angle
-// still matches the tile it would fit when rotated). Flip ambiguity is handled by the flip loops.
-function normShape(p){ const c=centroidOf(p);
-  let sxx=0,syy=0,sxy=0; for(const q of p){ const x=q.x-c.x,y=q.y-c.y; sxx+=x*x; syy+=y*y; sxy+=x*y; }
-  const th=0.5*Math.atan2(2*sxy,(sxx-syy)||1e-9), ct=Math.cos(th), st=Math.sin(th);   // major-axis angle
-  const q2=p.map(q=>{ const x=q.x-c.x,y=q.y-c.y; return {x:x*ct+y*st, y:-x*st+y*ct}; }); // rotate by -th
-  let s=0; for(const q of q2) s+=q.x*q.x+q.y*q.y; s=Math.sqrt(s/p.length)||1;
-  return q2.map(q=>({x:q.x/s,y:q.y/s})); }
+// normalise points: centre + scale to unit RMS radius (NO rotation) — used by bestAlign for the warp
+// correspondence, which must stay un-rotated (rotating it there mangles/empties the warp).
+function normShape(p){ const c=centroidOf(p); let s=0; for(const q of p) s+=(q.x-c.x)**2+(q.y-c.y)**2;
+  s=Math.sqrt(s/p.length)||1; return p.map(q=>({x:(q.x-c.x)/s,y:(q.y-c.y)/s})); }
+// rotate an already-normalised shape to its principal axis — used ONLY by the search match, so a figure
+// at any angle matches the tile it fits when rotated. (The ±180° ambiguity + reflections are tried in shapeCostTo.)
+function principalAlign(q){ let sxx=0,syy=0,sxy=0; for(const p of q){ sxx+=p.x*p.x; syy+=p.y*p.y; sxy+=p.x*p.y; }
+  const th=0.5*Math.atan2(2*sxy,(sxx-syy)||1e-9), c=Math.cos(th), s=Math.sin(th);
+  return q.map(p=>({x:p.x*c+p.y*s, y:-p.x*s+p.y*c})); }
 // best cyclic alignment of creature loop S to tile loop T (try every shift + both orientations)
 function bestAlign(S, T){
   const N=T.length, ns=normShape(S), nt=normShape(T);
@@ -2043,15 +2043,20 @@ function progCreep(base, target, secs){           // asymptotically approach tar
 // whose outline best matches a target silhouette, then that tile is used to fill. Every
 // candidate comes from randomGenome/mutate which only return simple() tiles, so the winner
 // is guaranteed 0-overlap/0-gap — it's the closest PERFECT tile to your idea. =====
-function _shapeTarget(silPts, N){ return { N, norm: normShape(resampleClosed(silPts, N)) }; }
-function shapeCostTo(outPts, target){                 // best cyclic+flip aligned SSD, normalized
-  const N=target.N, o=normShape(resampleClosed(outPts, N));
+function _shapeTarget(silPts, N){ return { N, norm: principalAlign(normShape(resampleClosed(silPts, N))) }; }
+// rotation + LR/UD flip + cyclic-shift aligned SSD. principalAlign fixes the continuous rotation; then we try
+// both reflections and both 180° orientations (cheap early-break inner loop) to nail the best match.
+function shapeCostTo(outPts, target){
+  const N=target.N, o0=principalAlign(normShape(resampleClosed(outPts, N))), T=target.norm;
   let best=Infinity;
-  for(const flip of [false,true]){
-    const s=flip ? o.map((_,i)=>o[(N-i)%N]) : o;
-    for(let sh=0; sh<N; sh++){ let c=0;
-      for(let i=0;i<N;i++){ const a=s[(i+sh)%N], b=target.norm[i]; c+=(a.x-b.x)**2+(a.y-b.y)**2; if(c>=best) break; }
-      if(c<best) best=c; }
+  for(const rev of [false,true]){                               // both traversal directions
+    const seq = rev ? o0.map((_,i)=>o0[(N-i)%N]) : o0;
+    for(const fy of [1,-1]) for(const fx of [1,-1]){            // id / LR-flip / UD-flip / 180° — full rotate+mirror set
+      const o = (fx===1&&fy===1) ? seq : seq.map(p=>({x:p.x*fx,y:p.y*fy}));
+      for(let sh=0; sh<N; sh++){ let c=0;                        // cyclic correspondence
+        for(let i=0;i<N;i++){ const a=o[(i+sh)%N], b=T[i]; c+=(a.x-b.x)**2+(a.y-b.y)**2; if(c>=best) break; }
+        if(c<best) best=c; }
+    }
   }
   return best;
 }
@@ -2867,7 +2872,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 41 (2026-07-01)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 42 (2026-07-01)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
