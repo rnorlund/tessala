@@ -296,21 +296,31 @@
     <div class="aiHead"><h2>🤖 Make a tessellation</h2><button id="aiClose">Close</button></div>
 
     <div id="aiWiz">
-      <!-- STEP 1 · choose -->
+      <!-- STEP 1 · choose source -->
       <div class="wizStep" data-step="1">
         <div class="wizTitle">How do you want to start?</div>
-        <div class="wizChoices">
-          <button class="wizCard" id="wizChoosePrompt"><div class="ic">✍️</div><div class="t">Describe an idea</div><div class="s">type what to draw</div></button>
-          <button class="wizCard" id="wizChooseImage"><div class="ic">🖼️</div><div class="t">Use my image</div><div class="s">drop or pick a picture</div></button>
+        <div class="wizChoices" style="grid-template-columns:1fr 1fr 1fr">
+          <button class="wizCard" id="wizSrcLocal"><div class="ic">🖥️</div><div class="t">Local model</div><div class="s">free · on your Mac · uncensored</div></button>
+          <button class="wizCard" id="wizSrcChat"><div class="ic">☁️</div><div class="t">ChatGPT</div><div class="s">describe an idea (uses your key)</div></button>
+          <button class="wizCard" id="wizSrcImage"><div class="ic">🖼️</div><div class="t">My image</div><div class="s">drop or pick a picture</div></button>
         </div>
-        <div class="wizKeyRow"><label>OpenAI key</label><input id="aiKey" class="wizField" type="password" placeholder="sk-… (stored only in this browser)" autocomplete="off" style="margin:0"></div>
       </div>
 
-      <!-- STEP 2a · prompt -->
+      <!-- STEP 2a · prompt (Local or ChatGPT) -->
       <div class="wizStep" data-step="2a" style="display:none">
-        <div class="wizTitle">✍️ What should the creature be?</div>
+        <div class="wizTitle" id="wizPromptTitle">✍️ What should it be?</div>
         <input id="aiSubjectA" class="wizField" placeholder="e.g. a koi fish · a barn owl · a bat · a beetle">
         <div class="wizHint">Compact, bold subjects tile best (fish, bird, bat, leaf, beetle, hand). Long thin things fit worse.</div>
+        <div id="wizLocalRow" style="display:none">
+          <div class="row" style="margin-top:6px"><label>local model</label>
+            <select id="wizModel" class="tbsel">
+              <option value="ponyDiffusionV6XL_v6StartWithThisOne.safetensors">Pony XL — anime</option>
+              <option value="lustifySDXLNSFWSFW_v20.safetensors">Lustify XL — realistic</option>
+              <option value="bigasp_v20.safetensors">BigASP v2 — photoreal</option>
+            </select></div>
+          <div class="wizHint" id="wizLocalStat">Checking local ComfyUI…</div>
+        </div>
+        <div id="wizKeyRow2" class="wizKeyRow"><label>OpenAI key</label><input id="aiKey" class="wizField" type="password" placeholder="sk-… (stored only in this browser)" autocomplete="off" style="margin:0"></div>
         <div class="wizNav"><button class="act" data-goto="1">← Back</button><button class="act primary" id="wizGoPrompt">Generate →</button></div>
       </div>
 
@@ -1324,6 +1334,13 @@ document.getElementById('btnLoad').addEventListener('click',()=>{
     r.onload=()=>{ try{loadState(JSON.parse(r.result));}catch(err){alert('Bad file');} }; r.readAsText(f);};
   inp.click();
 });
+// drag a saved .json design anywhere onto the window to reopen it
+window.addEventListener('dragover',e=>{ if(e.dataTransfer&&Array.from(e.dataTransfer.items||[]).some(it=>it.kind==='file')) e.preventDefault(); });
+window.addEventListener('drop',e=>{
+  const f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]; if(!f) return;
+  if(/\.json$/i.test(f.name) || f.type==='application/json'){ e.preventDefault();
+    const r=new FileReader(); r.onload=()=>{ try{ loadState(JSON.parse(r.result)); }catch(err){ alert('Could not open that file — not a Tessala .json design.'); } }; r.readAsText(f); }
+});
 function loadState(s){
   setPattern(s.type);
   if(s.edgePts) edgePts=s.edgePts;
@@ -1961,20 +1978,37 @@ function shapeCostTo(outPts, target){                 // best cyclic+flip aligne
   return best;
 }
 // search random valid tiles across the symmetries, keep the best fit, then locally refine it
-function searchBestTile(silPts, opts){
+// SEED then TUNE: a light random seed to find good basins per symmetry, then thousands of
+// simulated-annealing steps (our valid-only mutator) that hone the tile toward the target.
+// Async + yields so the progress bar stays live. Every candidate is a perfectly-tiling tile.
+async function searchBestTile(silPts, opts){
   opts=opts||{}; const N=48, target=_shapeTarget(silPts, N);
   const types=opts.types||['sqT','rot2','rot3','rot4','hexT','glide'];
-  const per=opts.per||220, gopt={wild:0.34,detail:6,lobe:0.5,spike:0.22};
-  let best={cost:Infinity};
-  for(const t of types){ const P=buildPattern(t);
-    for(let i=0;i<per;i++){ const ep=randomGenome(P,gopt); const c=shapeCostTo(outlineOf(P,ep), target);
-      if(c<best.cost) best={cost:c, type:t, ep}; } }
-  if(best.cost===Infinity) return null;
-  // local refinement (still only valid tiles): accept mutations that improve the fit
-  const P=buildPattern(best.type); let cur=best;
-  for(let i=0;i<(opts.refine||500);i++){ const ep=mutate(P, cur.ep, gopt); const c=shapeCostTo(outlineOf(P,ep), target);
-    if(c<cur.cost) cur={cost:c, type:best.type, ep}; }
-  return cur;
+  const gopt={wild:0.34,detail:7,lobe:0.5,spike:0.22};
+  const seedN=opts.seed||90, iters=opts.iters||2600, topK=opts.topK||3;
+  const yield_=()=>new Promise(r=>setTimeout(r,0));
+  const P0=(opts.progBase!=null)?opts.progBase:0.5, P1=(opts.progTop!=null)?opts.progTop:0.95;
+  let best={cost:Infinity}; const seeds=[];
+  // Phase 1 — seed each symmetry, keep its best starting point
+  for(let ti=0; ti<types.length; ti++){ const t=types[ti], P=buildPattern(t); let bt={cost:Infinity};
+    for(let i=0;i<seedN;i++){ const ep=randomGenome(P,gopt); const c=shapeCostTo(outlineOf(P,ep), target);
+      if(c<bt.cost) bt={cost:c,type:t,ep}; if(c<best.cost) best={cost:c,type:t,ep}; }
+    seeds.push(bt); if(typeof setProg==='function') setProg(P0+(P1-P0)*0.25*(ti+1)/types.length); await yield_();
+  }
+  seeds.sort((a,b)=>a.cost-b.cost);
+  // Phase 2 — anneal the best few basins (accept improvements; occasionally accept worse to escape)
+  const kk=Math.min(topK, seeds.length);
+  for(let s=0;s<kk;s++){ const seed=seeds[s]; if(seed.cost===Infinity) continue; const P=buildPattern(seed.type);
+    let cur={cost:seed.cost, ep:seed.ep}, T=Math.max(seed.cost*0.12, 1e-3);
+    for(let i=0;i<iters;i++){
+      const ep=mutate(P, cur.ep, gopt); const c=shapeCostTo(outlineOf(P,ep), target);
+      if(c<best.cost) best={cost:c, type:seed.type, ep};
+      if(c<cur.cost || Math.random()<Math.exp((cur.cost-c)/T)) cur={cost:c, ep};
+      T*=0.9985;
+      if((i&255)===0){ if(typeof setProg==='function') setProg(P0+(P1-P0)*(0.25+0.75*(s*iters+i)/(kk*iters))); await yield_(); }
+    }
+  }
+  return best.cost<Infinity ? best : null;
 }
 function aiStatusText(){
   document.getElementById('aiStatus').textContent =
@@ -2006,13 +2040,88 @@ async function wizRun(){                          // run the pipeline, then show
   const ok=(document.getElementById('aiAutoStatus').textContent||'').trim().startsWith('✓');
   if(ok){ wizDrawBigTile(); wizStep('4'); }      // else stay on step 3 with the error message
 }
-document.getElementById('wizChoosePrompt').addEventListener('click',()=>{ aiRefURL=null; aiRefFile=null; wizStep('2a'); document.getElementById('aiSubjectA').focus(); });
-document.getElementById('wizChooseImage').addEventListener('click',()=>wizStep('2b'));
+let wizSrc='chatgpt';   // 'local' | 'chatgpt' | 'image'
+const comfyURL=()=>(localStorage.getItem('tess_comfy_url')||'http://127.0.0.1:8189').replace(/\/$/,'');
+function wizPrepPromptScreen(){
+  const local=(wizSrc==='local');
+  document.getElementById('wizPromptTitle').textContent = local ? '🖥️ Local model — what to draw?' : '☁️ ChatGPT — what should it be?';
+  document.getElementById('wizLocalRow').style.display = local?'':'none';
+  document.getElementById('wizKeyRow2').style.display = local?'none':'';
+  wizStep('2a'); document.getElementById('aiSubjectA').focus();
+  if(local){ const st=document.getElementById('wizLocalStat'); st.textContent='Checking local ComfyUI…';
+    fetch(comfyURL()+'/system_stats',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject())
+      .then(()=>{ st.innerHTML='✓ Local ComfyUI is running — free, no limits.'; })
+      .catch(()=>{ st.innerHTML='✗ Not reachable. Run <b>ugi/start-comfy-cors.command</b> first (ComfyUI on :8189 with CORS).'; }); }
+}
+document.getElementById('wizSrcLocal').addEventListener('click',()=>{ wizSrc='local'; aiRefURL=null; aiRefFile=null; wizPrepPromptScreen(); });
+document.getElementById('wizSrcChat').addEventListener('click',()=>{ wizSrc='chatgpt'; aiRefURL=null; aiRefFile=null; wizPrepPromptScreen(); });
+document.getElementById('wizSrcImage').addEventListener('click',()=>{ wizSrc='image'; wizStep('2b'); });
 document.querySelectorAll('#aiWiz [data-goto]').forEach(b=>b.addEventListener('click',()=>wizStep(b.dataset.goto)));
 document.getElementById('wizGoPrompt').addEventListener('click',()=>{
-  if(!document.getElementById('aiKey').value.trim()){ document.getElementById('aiAutoStatus').textContent='⚠ Enter your OpenAI key on the first screen.'; wizStep('3'); return; }
+  const subj=document.getElementById('aiSubjectA').value.trim();
+  if(!subj){ document.getElementById('aiSubjectA').focus(); return; }
+  if(wizSrc==='local'){ wizRunLocal(subj); return; }
+  if(!document.getElementById('aiKey').value.trim()){ document.getElementById('aiAutoStatus').textContent='⚠ Enter your OpenAI key.'; wizStep('3'); return; }
   aiRefURL=null; aiRefFile=null; wizRun();
 });
+// ---- LOCAL generation via ComfyUI (txt2img SDXL) — fully on-device, no cloud ----
+async function comfyTxt2Img(subject, model){
+  const url=comfyURL(), pony=/pony/i.test(model);
+  const pos=(pony?'score_9, score_8_up, score_7_up, ':'')+subject+', single subject, centered, full body, bold graphic, thick clean outlines, high contrast, plain flat solid white background, studio';
+  const neg=(pony?'score_6, score_5, score_4, ':'')+'busy background, scenery, pattern, multiple subjects, border, frame, text, watermark, cropped, blurry';
+  const seed=Math.floor(Math.random()*1e15);
+  const g={
+    "4":{class_type:"CheckpointLoaderSimple",inputs:{ckpt_name:model}},
+    "6":{class_type:"CLIPTextEncode",inputs:{text:pos,clip:["4",1]}},
+    "7":{class_type:"CLIPTextEncode",inputs:{text:neg,clip:["4",1]}},
+    "5":{class_type:"EmptyLatentImage",inputs:{width:1024,height:1024,batch_size:1}},
+    "3":{class_type:"KSampler",inputs:{seed,steps:24,cfg:6.5,sampler_name:"dpmpp_2m",scheduler:"karras",denoise:1,model:["4",0],positive:["6",0],negative:["7",0],latent_image:["5",0]}},
+    "8":{class_type:"VAEDecode",inputs:{samples:["3",0],vae:["4",2]}},
+    "9":{class_type:"SaveImage",inputs:{filename_prefix:"tess",images:["8",0]}}
+  };
+  const cid='tess'+seed;
+  let pr; try{ pr=await fetch(url+'/prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:g,client_id:cid})}); }
+  catch(e){ throw new Error('Local ComfyUI not reachable at '+url+' — run ugi/start-comfy-cors.command (and it must allow CORS).'); }
+  if(!pr.ok) throw new Error('ComfyUI rejected the job (HTTP '+pr.status+').');
+  const pid=(await pr.json()).prompt_id;
+  for(let i=0;i<180;i++){ await new Promise(r=>setTimeout(r,1500));
+    const h=await (await fetch(url+'/history/'+pid,{cache:'no-store'})).json();
+    const rec=h[pid]; if(rec&&rec.outputs){ for(const nid in rec.outputs){ const im=rec.outputs[nid].images;
+      if(im&&im.length){ const q=new URLSearchParams({filename:im[0].filename,subfolder:im[0].subfolder||'',type:im[0].type||'output'});
+        const blob=await (await fetch(url+'/view?'+q)).blob(); return await new Promise(res=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.readAsDataURL(blob);}); } } }
+    if(typeof setProg==='function') setProg(0.1+0.35*Math.min(1,i/40));
+  }
+  throw new Error('Local render timed out.');
+}
+async function wizRunLocal(subject){
+  const btn=document.getElementById('aiAutoBtn'); btn.disabled=true;
+  const status=document.getElementById('aiAutoStatus'); wizStep('3'); progShow(true); setProg(0.05);
+  try{
+    status.textContent='🖥️ Rendering locally on your Mac… (first run loads the model — can be slow)';
+    const model=document.getElementById('wizModel').value;
+    const dataURL=await comfyTxt2Img(subject, model);
+    status.textContent='🔎 Seeding + tuning perfect tiles to match…'; setProg(0.5);
+    const src=await loadImg(dataURL), sil=await prepSilhouette(src);
+    const cont=alphaContour(sil,1024); if(!cont) throw new Error('Could not read a silhouette from the render — try a bolder subject.');
+    const fit=await searchBestTile(resampleClosed(cont,240),{progBase:0.5,progTop:0.9}); if(!fit) throw new Error('No fitting tile found.');
+    setPattern(fit.type); edgePts=cloneEp(fit.ep); texFrame=computeTexFrame(buildOutline());
+    const warped=escherWarp(src);           // fill the tile with the local creature (no cloud)
+    pushUndo();
+    loadTexFromURL(warped||dataURL, ()=>{
+      useTexture=true; document.getElementById('aiUse').checked=true; document.getElementById('stampMode').checked=false;
+      texZoom=1.0; document.getElementById('aiZoom').value=1.0; tool='pan';
+      document.querySelectorAll('.tool').forEach(x=>x.classList.toggle('on', x.dataset.tool==='pan'));
+      cv.style.cursor='grab'; document.getElementById('shapeHelp').style.display='none';
+      buildProcessedTex(); aiStatusText(); draw();
+      const cprev=document.getElementById('aiCreaturePrev'); if(cprev){const cx=cprev.getContext('2d');cx.clearRect(0,0,cprev.width,cprev.height);cx.fillStyle='#cfd6e0';cx.fillRect(0,0,cprev.width,cprev.height);cx.drawImage(src,0,0,cprev.width,cprev.height);}
+      const tprev=document.getElementById('aiTilePrev'); if(tprev){const tx=tprev.getContext('2d');tx.clearRect(0,0,tprev.width,tprev.height);tx.drawImage(cv,0,0,tprev.width,tprev.height);}
+      document.getElementById('aiResult').style.display=''; setProg(1); setTimeout(()=>progShow(false),700);
+      wizDrawBigTile(); wizStep('4');
+      status.textContent='✓ Made locally (pattern: '+pat.type+'). 🩹 Fill white space needs ChatGPT; local fill is the warp.';
+    });
+  }catch(err){ progStop(); progShow(false); status.textContent='✗ '+err.message; }
+  btn.disabled=false;
+}
 document.getElementById('wizGoImage').addEventListener('click',()=>{
   if(!aiRefFile) return;
   document.getElementById('aiSubjectA').value=document.getElementById('wizName').value||'';
@@ -2127,13 +2236,15 @@ async function autoFill(){
         const ci=new Image();
         ci.onload=async ()=>{ try{
           if(mode==='auto'){
-            const cont=alphaContour(ci,1024); if(!cont){ reject(new Error('Could not read the silhouette — try a bolder subject.')); return; }
-            status.textContent='🔎 Searching thousands of perfect tiles for the best fit…';
-            const fit=searchBestTile(resampleClosed(cont,240), {per:170, refine:500});
+            const sil=await prepSilhouette(ci);   // strip any opaque background first
+            const cont=alphaContour(sil,1024); if(!cont){ reject(new Error('Could not read the silhouette — try a bolder subject.')); return; }
+            status.textContent='🔎 Seeding + tuning thousands of perfect tiles to match…';
+            const fit=await searchBestTile(resampleClosed(cont,240), {});
             if(!fit){ reject(new Error('No fitting tile found — try again or a bolder subject.')); return; }
             setPattern(fit.type); edgePts=cloneEp(fit.ep); texFrame=computeTexFrame(buildOutline());
           } else {
-            if(!escherFit(ci,1024)){ reject(new Error('Could not read the figure silhouette — try a bolder subject.')); return; }
+            const sil=await prepSilhouette(ci);
+            if(!escherFit(sil,1024)){ reject(new Error('Could not read the figure silhouette — try a bolder subject.')); return; }
           }
           const shapeBlob=await (await fetch(buildShapePNG())).blob();   // white silhouette of the chosen valid tile
           status.textContent='🎨 Re-drawing the figure into the tile… (15–45s)'; progCreep(0.55,0.96,30);
@@ -2156,11 +2267,11 @@ async function autoFill(){
       status.textContent='🧩 Reshaping the tile to the creature…'; setProg(0.94);
       await new Promise((resolve,reject)=>{
         const ci=new Image();
-        ci.onload=()=>{
-          const warped=escherWarp(ci);
+        ci.onload=async ()=>{ try{
+          const warped=escherWarp(await prepSilhouette(ci));
           if(!warped){ reject(new Error('Could not read the creature silhouette — try a bolder subject.')); return; }
           loadTexFromURL(warped, ()=>{ applyResult(ci); resolve(); });
-        };
+        }catch(e){ reject(e); } };
         ci.onerror=()=>reject(new Error('creature image failed to load'));
         ci.src=dataURL;
       });
@@ -2170,7 +2281,10 @@ async function autoFill(){
       loadTexFromURL(dataURL, ()=>applyResult(texImage));
     }
   }catch(err){
-    status.textContent='✗ '+err.message+(/40[13]|verif/i.test(err.message)?'  (gpt-image-1 needs a verified org + credits — check platform.openai.com billing.)':'');
+    let m=err.message||'error';
+    if(/moderation|safety|content policy|rejected|not allowed|violat/i.test(m)) m='The AI declined that subject (content policy). Try rephrasing — or use “🖼️ Use my image” / a local generator instead.';
+    else if(/40[13]|verif/i.test(m)) m+='  (gpt-image-1 needs a verified org + credits — check platform.openai.com billing.)';
+    status.textContent='✗ '+m;
   }
   progStop(); progShow(false);
   btn.disabled=false;
@@ -2207,7 +2321,7 @@ async function autoFromImage(key, quality){
     const cont=alphaContour(sil,1024);
     if(!cont) throw new Error('Could not find a clear subject in the image (use a cutout or a plain-background picture).');
     status.textContent='🔎 Searching thousands of perfect tiles to match your image…'; progCreep(0.08,0.5,10);
-    const fit=searchBestTile(resampleClosed(cont,240),{per:170,refine:500});
+    const fit=await searchBestTile(resampleClosed(cont,240),{});
     if(!fit) throw new Error('No fitting tile found — try a bolder / more compact image.');
     setPattern(fit.type); edgePts=cloneEp(fit.ep); texFrame=computeTexFrame(buildOutline());
     status.textContent='🎨 Re-drawing your character into the tile… (15–45s)'; progCreep(0.5,0.95,28);
@@ -2510,7 +2624,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 33 (2026-07-01)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 34 (2026-07-01)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
