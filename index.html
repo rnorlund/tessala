@@ -327,7 +327,13 @@
             <option value="glide">Glide row (simple)</option>
             <option value="sqT">Square grid (simplest)</option>
           </select></div>
-        <div class="wizHint">Auto leans toward rotational pinwheels (rot3/rot4) — the intricate Escher look. Force a pattern here to override; the figure warps to fit it.</div>
+        <div class="wizHint">Auto leans toward rotational pinwheels (rot3/rot4) — the intricate Escher look. Force a pattern here to override.</div>
+        <div class="row" style="margin-top:8px"><label>fill look</label>
+          <div id="fillLook" style="display:flex;gap:6px;flex:1">
+            <button type="button" class="fillOpt" data-redraw="1" style="flex:1;padding:7px;border-radius:8px;border:1px solid #6ea8fe;background:#141b2b;color:#eaf1ff;font-size:11px;cursor:pointer;line-height:1.25">◆ Gap-free<br><span style="opacity:.7;font-size:10px">redraw · dense</span></button>
+            <button type="button" class="fillOpt" data-redraw="0" style="flex:1;padding:7px;border-radius:8px;border:1px solid #2a3348;background:#0c0f16;color:#8a93a6;font-size:11px;cursor:pointer;line-height:1.25">◇ Keep figure + white space<br><span style="opacity:.7;font-size:10px">warp · airy</span></button>
+          </div></div>
+        <div class="wizHint"><b>Gap-free</b> redraws the figure to fill every pixel (dense, true interlock). <b>Keep figure</b> warps your exact figure in and leaves its white space (airy, most legible).</div>
         <div id="wizLocalRow" style="display:none">
           <div class="row" style="margin-top:6px"><label>local model</label>
             <select id="wizModel" class="tbsel">
@@ -2102,6 +2108,12 @@ function wizStep(step){ document.querySelectorAll('#aiWiz .wizStep').forEach(s=>
 // null = auto (complexity-weighted search); else restrict the search to the one symmetry the user forced.
 function forcedSymTypes(){ const s=document.getElementById('wizSym'); if(!s) return null; const v=s.value;
   return (v==='auto'||v==='current') ? null : [v]; }   // 'current' handled separately (fill into the on-screen tile)
+// front-line "fill look" buttons -> drive the localRedraw checkbox (gap-free redraw vs keep-figure warp)
+(function(){ const paint=redraw=>{ const lr=document.getElementById('localRedraw'); if(lr) lr.checked=redraw;
+    document.querySelectorAll('#fillLook .fillOpt').forEach(x=>{ const on=(x.dataset.redraw==='1')===redraw;
+      x.style.borderColor=on?'#6ea8fe':'#2a3348'; x.style.background=on?'#141b2b':'#0c0f16'; x.style.color=on?'#eaf1ff':'#8a93a6'; }); };
+  document.querySelectorAll('#fillLook .fillOpt').forEach(b=>b.addEventListener('click',()=>paint(b.dataset.redraw==='1')));
+  const lr=document.getElementById('localRedraw'); if(lr) lr.addEventListener('change',()=>paint(lr.checked)); })();
 function wizDrawBigTile(){ const c=document.getElementById('aiBigTile'); if(!c) return; const x=c.getContext('2d');
   x.clearRect(0,0,c.width,c.height); try{ x.drawImage(cv,0,0,c.width,c.height); }catch(e){} }
 async function wizRun(){                          // run the pipeline, then show result or stay on error
@@ -2224,8 +2236,9 @@ async function wizRunLocal(subject){
         resURL=await comfyInpaint(base.toDataURL('image/png'), mk.toDataURL('image/png'), subject, model, 1.0);
       }else{
         status.textContent='🖥️ Rendering '+subject+' to warp into your tile ('+patName+')… (20–50s)'; setProg(0.3);
-        const src=await loadImg(await comfyTxt2Img(subject, model));
-        resURL=warpToCurrentTile(src); if(!resURL) throw new Error('Could not warp into this tile — try the redraw finish (Advanced).');
+        const gsrc=await loadImg(await comfyTxt2Img(subject, model));
+        const g2=await readSil(gsrc); const wimg=g2?g2.sil:gsrc;   // strip bg so white space stays white
+        resURL=warpToCurrentTile(wimg); if(!resURL) throw new Error('Could not warp into this tile — try the redraw finish (Advanced).');
       }
       pushUndo();
       loadTexFromURL(resURL, ()=>{
@@ -2268,10 +2281,10 @@ async function wizRunLocal(subject){
       bx.fillStyle='#ffffff'; bx.fillRect(0,0,RES,RES);            // opaque white base for the inpaint
       resURL=await comfyInpaint(base.toDataURL('image/png'), mk.toDataURL('image/png'), subject, model, 1.0);
     }else{
-      // ── A · WARP + FILL: keep the EXACT source image; reshape tile to it and warp the source pixels in.
-      //    Faithful to the render, but its own light areas read as gaps → use 🩹 Fill to grow them closed.
+      // ── A · WARP: keep the EXACT figure and its white space; reshape tile to it and warp the figure in.
+      //    Uses the background-stripped silhouette so the negative space stays white (airy, legible).
       edgePts=cloneEp(fit.ep); texFrame=computeTexFrame(buildOutline());
-      resURL=escherWarp(src)||dataURL;
+      resURL=escherWarp(sil)||escherWarp(src)||dataURL;
     }
     pushUndo();
     loadTexFromURL(resURL, ()=>{
@@ -2838,7 +2851,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 39 (2026-07-01)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 40 (2026-07-01)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
