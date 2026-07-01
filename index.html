@@ -2291,15 +2291,24 @@ async function wizRunLocal(subject){
 
     let resURL, src=null, patLabel;
     if(redraw){
-      // ── ROBUST REDRAW (default): pick a VALID interlocking tile of the chosen symmetry, then have the AI
-      //    draw the subject to FILL it (expanding/adding features to reach every edge). No figure-silhouette
-      //    extraction, no tile-matching → nothing fragile to fail (fixes the koi/blue-fish silhouette deaths).
+      // Draw the creature → read its shape (robust) → match a symmetry → reshape the tile TO the creature,
+      // then RE-DRAW the creature to fill that creature-shaped tile = RECOGNISABLE (like the owl). If the shape
+      // truly can't be read, fall back to a generic valid tile (never fails, just more abstract).
+      status.textContent='🖥️ Drawing '+subject+'… (first run loads the model)'; setProg(0.2);
+      src=await loadImg(await comfyTxt2Img(subject, model)); let got=await readSil(src);
+      if(!got){ status.textContent='↻ Re-drawing for a clearer shape…'; src=await loadImg(await comfyTxt2Img(subject, model)); got=await readSil(src); }
       const forced=forcedSymTypes();
-      const type = forced ? forced[0] : ['rot3','rot4','hexT'][Math.floor(Math.random()*3)];   // auto → an intricate one
-      status.textContent='🧩 Building a valid '+type+' tile…'; setProg(0.2);
-      setPattern(type); edgePts=cloneEp(pickValidTile(type)); texFrame=computeTexFrame(buildOutline());
-      patLabel=type;
-      status.textContent='🎨 Drawing '+subject+' to fill the '+type+' tile… (20–50s)'; setProg(0.5); progCreep(0.5,0.9,30);
+      if(got){
+        status.textContent='🔎 Matching a tile to your '+subject+'…'; setProg(0.45);
+        const fit=await searchBestTile(resampleClosed(got.cont,240),{types:forced||undefined,progBase:0.45,progTop:0.68});
+        setPattern(fit.type); patLabel=fit.type;
+        if(!escherFit(got.sil,1024)) edgePts=cloneEp(fit.ep);         // tile now shaped like the creature
+      }else{
+        const type = forced?forced[0]:['rot3','rot4','hexT'][Math.floor(Math.random()*3)];
+        setPattern(type); edgePts=cloneEp(pickValidTile(type)); patLabel=type+' (generic)';
+      }
+      texFrame=computeTexFrame(buildOutline());
+      status.textContent='🎨 Drawing '+subject+' to fill the '+patLabel+' tile… (20–50s)'; setProg(0.7); progCreep(0.7,0.92,25);
       const RES=1024;
       const mk=document.createElement('canvas'); mk.width=mk.height=RES; const mc=mk.getContext('2d');
       mc.fillStyle='#000'; mc.fillRect(0,0,RES,RES); paintShape(mc, texFrame, RES, {fill:'#ffffff'});   // white = draw here
@@ -2554,6 +2563,31 @@ async function readSil(img){
     const kept=1-removed/(RES*RES); if(kept<0.03 || removed<RES*RES*0.02) continue;   // ate everything / nothing
     x.putImageData(d,0,0); sil=await loadImg(cv.toDataURL('image/png')); c=check(sil); if(c) return {cont:c, sil};
   }
+  // ROBUST last resort: non-near-white pixels = subject; keep the LARGEST connected blob + fill its holes.
+  // Works even when the figure touches the border or the background is light-grey (where border-flood fails).
+  { const off=document.createElement('canvas'); off.width=off.height=RES; const x=off.getContext('2d');
+    x.drawImage(img,0,0,RES,RES); const d=x.getImageData(0,0,RES,RES), D=d.data;
+    const N=RES*RES, fg=new Uint8Array(N);
+    for(let i=0;i<N;i++){ const r=D[i*4],g=D[i*4+1],b=D[i*4+2], mx=Math.max(r,g,b), mn=Math.min(r,g,b);
+      fg[i] = (mn<236 && !(mx>230 && mx-mn<16)) ? 1 : 0; }               // not near-white, not light-grey
+    const lab=new Int32Array(N), stk=new Int32Array(N); let cur=0,bestLab=0,bestSz=0;
+    for(let s=0;s<N;s++){ if(!fg[s]||lab[s]) continue; cur++; let sp=0,sz=0; stk[sp++]=s; lab[s]=cur;
+      while(sp){ const p=stk[--sp]; sz++; const px=p%RES,py=(p/RES)|0;
+        if(px>0&&fg[p-1]&&!lab[p-1]){lab[p-1]=cur;stk[sp++]=p-1;}
+        if(px<RES-1&&fg[p+1]&&!lab[p+1]){lab[p+1]=cur;stk[sp++]=p+1;}
+        if(py>0&&fg[p-RES]&&!lab[p-RES]){lab[p-RES]=cur;stk[sp++]=p-RES;}
+        if(py<RES-1&&fg[p+RES]&&!lab[p+RES]){lab[p+RES]=cur;stk[sp++]=p+RES;} }
+      if(sz>bestSz){bestSz=sz;bestLab=cur;} }
+    if(bestSz>N*0.03 && bestSz<N*0.97){
+      const outside=new Uint8Array(N); let sp=0;                          // flood bg from border over non-creature
+      const seed=p=>{ if(lab[p]!==bestLab && !outside[p]){ outside[p]=1; stk[sp++]=p; } };
+      for(let px=0;px<RES;px++){ seed(px); seed((RES-1)*RES+px); }
+      for(let py=0;py<RES;py++){ seed(py*RES); seed(py*RES+RES-1); }
+      while(sp){ const p=stk[--sp]; const px=p%RES,py=(p/RES)|0;
+        if(px>0)seed(p-1); if(px<RES-1)seed(p+1); if(py>0)seed(p-RES); if(py<RES-1)seed(p+RES); }
+      for(let i=0;i<N;i++) D[i*4+3] = outside[i] ? 0 : 255;               // subject + interior holes kept, bg dropped
+      x.putImageData(d,0,0); sil=await loadImg(off.toDataURL('image/png')); c=check(sil); if(c) return {cont:c, sil};
+    } }
   return null;
 }
 // Auto-Escherize from an IMPORTED image: match ~1000 perfect tiles to its silhouette,
@@ -2885,7 +2919,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 43 (2026-07-01)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 44 (2026-07-01)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
