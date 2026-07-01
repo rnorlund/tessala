@@ -292,7 +292,7 @@
       </div>
       <div class="aiAutoRow" id="aiRefRow">
         <button class="act" id="aiRefBtn" style="margin:0;white-space:nowrap">📎 Reference image…</button>
-        <span id="aiRefStatus" class="aiHint" style="flex:1;align-self:center">For mode <b>R</b>: a character photo/drawing to redraw into your tile. <i>none loaded</i></span>
+        <span id="aiRefStatus" class="aiHint" style="flex:1;align-self:center">Attach an image, then <b>★ Auto</b> matches a perfect tile to it (or <b>R</b> fills your current tile with it). <i>none loaded</i></span>
         <button class="act" id="aiRefClear" style="margin:0;display:none;white-space:nowrap">✕</button>
       </div>
       <div id="aiProg" style="display:none;height:7px;border-radius:5px;background:#1c1f26;border:1px solid var(--line);overflow:hidden;margin:2px 0 4px">
@@ -304,7 +304,11 @@
           <div class="aiResCol"><canvas id="aiCreaturePrev" width="150" height="150" class="prevc"></canvas><div class="aiHint">what the AI drew</div></div>
           <div class="aiResCol"><canvas id="aiTilePrev" width="230" height="150" class="prevc"></canvas><div class="aiHint">how it tiles</div></div>
         </div>
-        <div class="aiHint">Good? <b>Close</b> to use it. Not quite? Edit the prompt and <b>Generate</b> again.</div>
+        <div class="aiAutoRow" style="margin-top:8px">
+          <button class="act" id="aiGapBtn" style="margin:0;white-space:nowrap" title="Ask the AI to grow the figure's hair / cape / limbs into any leftover empty space inside the tile. Click again to fill more.">🩹 Fill white space</button>
+          <span class="aiHint" style="flex:1;align-self:center">Extends the figure into leftover gaps (repeatable).</span>
+        </div>
+        <div class="aiHint">Good? <b>Close</b> to use it. Not quite? Edit the prompt and <b>Generate</b> again, or <b>Fill white space</b> to grow the figure into the gaps.</div>
       </div>
     </div>
     <div class="aiOr">— or do it by hand with ChatGPT —</div>
@@ -1953,6 +1957,7 @@ async function autoFill(){
   const subject=(document.getElementById('aiSubjectA').value || document.getElementById('aiSubject').value || 'animal').trim();
   const quality=document.getElementById('aiQuality').value;
   const mode=document.getElementById('aiMode').value;
+  if(mode==='auto' && aiRefFile) return autoFromImage(key, quality);   // Auto + attached image -> match tiles to YOUR image
   const btn=document.getElementById('aiAutoBtn'); btn.disabled=true;
   progShow(true); setProg(0.04);
   try{
@@ -2085,6 +2090,119 @@ async function autoFill(){
   progStop(); progShow(false);
   btn.disabled=false;
 }
+function loadImg(src){ return new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=src; }); }
+// Return an image with a transparent background silhouette. If the source is opaque,
+// flood the border-connected background (by corner colour) to transparent first.
+async function prepSilhouette(img){
+  const RES=1024, c=document.createElement('canvas'); c.width=c.height=RES; const x=c.getContext('2d');
+  x.drawImage(img,0,0,RES,RES); const d=x.getImageData(0,0,RES,RES), D=d.data;
+  let transp=0; for(let i=0;i<RES*RES;i++) if(D[i*4+3]<30) transp++;
+  if(transp < RES*RES*0.03){                                  // opaque bg -> remove it
+    const cor=[[2,2],[RES-3,2],[2,RES-3],[RES-3,RES-3]]; let br=0,bg=0,bb=0;
+    for(const [px,py] of cor){ const i=(py*RES+px)*4; br+=D[i]; bg+=D[i+1]; bb+=D[i+2]; } br/=4;bg/=4;bb/=4;
+    const thr=64*64, vis=new Uint8Array(RES*RES), st=[];
+    const close=p=>{ const dr=D[p*4]-br,dg=D[p*4+1]-bg,db=D[p*4+2]-bb; return dr*dr+dg*dg+db*db<thr; };
+    for(let px=0;px<RES;px++){ st.push(px); st.push((RES-1)*RES+px); }
+    for(let py=0;py<RES;py++){ st.push(py*RES); st.push(py*RES+RES-1); }
+    while(st.length){ const p=st.pop(); if(vis[p]||!close(p)) continue; vis[p]=1; const px=p%RES,py=(p/RES)|0;
+      if(px>0)st.push(p-1); if(px<RES-1)st.push(p+1); if(py>0)st.push(p-RES); if(py<RES-1)st.push(p+RES); }
+    for(let i=0;i<RES*RES;i++) if(vis[i]) D[i*4+3]=0;
+    x.putImageData(d,0,0);
+  }
+  return loadImg(c.toDataURL('image/png'));
+}
+// Auto-Escherize from an IMPORTED image: match ~1000 perfect tiles to its silhouette,
+// then redraw that character into the winner (multi-image edit). + Fill white space after.
+async function autoFromImage(key, quality){
+  const status=document.getElementById('aiAutoStatus'); const btn=document.getElementById('aiAutoBtn'); btn.disabled=true;
+  progShow(true); setProg(0.08);
+  try{
+    status.textContent='🖼️ Reading your image…';
+    const src=await loadImg(aiRefURL), sil=await prepSilhouette(src);
+    const cont=alphaContour(sil,1024);
+    if(!cont) throw new Error('Could not find a clear subject in the image (use a cutout or a plain-background picture).');
+    status.textContent='🔎 Searching thousands of perfect tiles to match your image…'; progCreep(0.08,0.5,10);
+    const fit=searchBestTile(resampleClosed(cont,240),{per:170,refine:500});
+    if(!fit) throw new Error('No fitting tile found — try a bolder / more compact image.');
+    setPattern(fit.type); edgePts=cloneEp(fit.ep); texFrame=computeTexFrame(buildOutline());
+    status.textContent='🎨 Re-drawing your character into the tile… (15–45s)'; progCreep(0.5,0.95,28);
+    const shapeBlob=await (await fetch(buildShapePNG())).blob();
+    const who=(document.getElementById('aiSubjectA').value||'').trim();
+    const fd=new FormData(); fd.append('model','gpt-image-1');
+    fd.append('image[]', shapeBlob, 'shape.png'); fd.append('image[]', aiRefFile, aiRefFile.name||'ref.png');
+    fd.append('prompt','The FIRST image is a white tile silhouette (transparent outside). The SECOND shows '+(who||'a character')+'. Redraw THAT SAME character — same hair, face, clothing and colours — re-posed and bent so its body COMPLETELY fills the white silhouette to every edge, undistorted, leaving NO empty space inside. Thick clean black outlines, bold flat colours, transparent outside the shape. Output 1024x1024.');
+    fd.append('size','1024x1024'); fd.append('quality', quality); fd.append('background','transparent'); fd.append('n','1');
+    const r=await fetch('https://api.openai.com/v1/images/edits',{method:'POST',headers:{Authorization:'Bearer '+key},body:fd});
+    progStop(); setProg(0.95);
+    if(!r.ok){ let m; try{m=(await r.json()).error.message;}catch(e){m=await r.text();} throw new Error('HTTP '+r.status+' — '+(m||'').slice(0,150)); }
+    const j=await r.json(); const b64=j.data&&j.data[0]&&j.data[0].b64_json; if(!b64) throw new Error('No image returned.');
+    pushUndo();
+    loadTexFromURL('data:image/png;base64,'+b64, ()=>{
+      useTexture=true; document.getElementById('aiUse').checked=true;
+      document.getElementById('stampMode').checked=false; texZoom=1.04; document.getElementById('aiZoom').value=1.04;
+      tool='pan'; document.querySelectorAll('.tool').forEach(x=>x.classList.toggle('on', x.dataset.tool==='pan'));
+      cv.style.cursor='grab'; document.getElementById('shapeHelp').style.display='none';
+      buildProcessedTex(); aiStatusText(); draw();
+      const cprev=document.getElementById('aiCreaturePrev'); if(cprev){ const cx=cprev.getContext('2d'); cx.clearRect(0,0,cprev.width,cprev.height); cx.fillStyle='#cfd6e0'; cx.fillRect(0,0,cprev.width,cprev.height); cx.drawImage(texImage,0,0,cprev.width,cprev.height); }
+      const tprev=document.getElementById('aiTilePrev'); if(tprev){ const tx=tprev.getContext('2d'); tx.clearRect(0,0,tprev.width,tprev.height); tx.drawImage(cv,0,0,tprev.width,tprev.height); }
+      document.getElementById('aiResult').style.display='';
+      setProg(1); setTimeout(()=>progShow(false),700);
+      status.textContent='✓ Matched a perfect tile to your image (pattern: '+pat.type+'). Use 🩹 Fill white space to grow into any gaps.';
+    });
+  }catch(err){ progStop(); progShow(false); status.textContent='✗ '+err.message; }
+  btn.disabled=false;
+}
+// Iterative gap fill: mask the still-empty area INSIDE the tile and ask gpt-image-1 to
+// extend the figure (hair/cape/limbs/tail) into just those regions. Repeatable.
+async function fillGaps(){
+  const status=document.getElementById('aiAutoStatus');
+  const key=document.getElementById('aiKey').value.trim();
+  if(!key){ status.textContent='⚠ Enter your OpenAI API key first.'; return; }
+  if(!texImage||!texFrame){ status.textContent='Generate or fill a tile first.'; return; }
+  const btn=document.getElementById('aiGapBtn'); if(btn) btn.disabled=true;
+  progShow(true); setProg(0.08); progCreep(0.08,0.9,22);
+  try{
+    const RES=1024;
+    // current fill, drawn exactly as it appears (honouring texZoom / nudge)
+    const fc=document.createElement('canvas'); fc.width=fc.height=RES; const fx=fc.getContext('2d');
+    const z=texZoom||1, s=RES*z, dx=(RES-s)/2+(texOffX||0)*RES, dy=(RES-s)/2+(texOffY||0)*RES;
+    fx.drawImage(texProcessed||texImage, dx,dy,s,s);
+    const fdat=fx.getImageData(0,0,RES,RES).data;
+    // white mask of the tile region
+    const shp=document.createElement('canvas'); shp.width=shp.height=RES;
+    paintShape(shp.getContext('2d'), texFrame, RES, {fill:'#ffffff'});
+    const sdat=shp.getContext('2d').getImageData(0,0,RES,RES).data;
+    // edit mask: transparent(0)=fill here (inside tile & empty), opaque(255)=keep
+    const mk=document.createElement('canvas'); mk.width=mk.height=RES; const mc=mk.getContext('2d');
+    const mim=mc.createImageData(RES,RES), md=mim.data; let empty=0;
+    for(let i=0;i<RES*RES;i++){ md[i*4]=md[i*4+1]=md[i*4+2]=255;
+      const inside=sdat[i*4+3]>10, filled=fdat[i*4+3]>30;
+      if(inside && !filled){ md[i*4+3]=0; empty++; } else md[i*4+3]=255; }
+    mc.putImageData(mim,0,0);
+    if(empty < RES*RES*0.004){ progStop(); progShow(false); status.textContent='✓ Tile is already full — no white space left.'; if(btn) btn.disabled=false; return; }
+    status.textContent='🩹 Growing the figure into the gaps… (10–35s)';
+    const imgBlob=await (await fetch(fc.toDataURL('image/png'))).blob();
+    const maskBlob=await (await fetch(mk.toDataURL('image/png'))).blob();
+    const fd=new FormData(); fd.append('model','gpt-image-1');
+    fd.append('image', imgBlob,'img.png'); fd.append('mask', maskBlob,'mask.png');
+    fd.append('prompt','Extend the existing character to completely fill the transparent regions — flow its hair, clothing/cape, limbs or tail into them so they reach every edge with no empty space. Match the existing flat colours, shading and thick clean black outlines exactly, as if one continuous drawing. Do not change anything already drawn.');
+    fd.append('size','1024x1024'); fd.append('quality', document.getElementById('aiQuality').value); fd.append('background','transparent'); fd.append('n','1');
+    const r=await fetch('https://api.openai.com/v1/images/edits',{method:'POST',headers:{Authorization:'Bearer '+key},body:fd});
+    progStop(); setProg(0.95);
+    if(!r.ok){ let m; try{m=(await r.json()).error.message;}catch(e){m=await r.text();} throw new Error('HTTP '+r.status+' — '+(m||'').slice(0,150)); }
+    const j=await r.json(); const b64=j.data&&j.data[0]&&j.data[0].b64_json; if(!b64) throw new Error('No image returned.');
+    pushUndo();
+    loadTexFromURL('data:image/png;base64,'+b64, ()=>{
+      texZoom=1.0; document.getElementById('aiZoom').value=1.0;   // it now fills to the edges
+      buildProcessedTex(); draw();
+      const tprev=document.getElementById('aiTilePrev'); if(tprev){ const tx=tprev.getContext('2d'); tx.clearRect(0,0,tprev.width,tprev.height); tx.drawImage(cv,0,0,tprev.width,tprev.height); }
+      const cprev=document.getElementById('aiCreaturePrev'); if(cprev){ const cx=cprev.getContext('2d'); cx.clearRect(0,0,cprev.width,cprev.height); cx.fillStyle='#cfd6e0'; cx.fillRect(0,0,cprev.width,cprev.height); cx.drawImage(texImage,0,0,cprev.width,cprev.height); }
+      setProg(1); setTimeout(()=>progShow(false),700);
+      status.textContent='✓ Filled the gaps. Click 🩹 again to fill any that remain.';
+    });
+  }catch(err){ progStop(); progShow(false); status.textContent='✗ '+err.message; }
+  if(btn) btn.disabled=false;
+}
 function loadTexFromURL(url, cb){
   const img=new Image();
   img.onload=()=>{ texImage=img; texImageURL=url; if(!texFrame) texFrame=computeTexFrame(buildOutline()); cb&&cb(); };
@@ -2094,19 +2212,19 @@ let texImageURL=null;
 document.getElementById('btnAI').addEventListener('click',openAI);
 document.getElementById('aiClose').addEventListener('click',closeAI);
 document.getElementById('aiAutoBtn').addEventListener('click',autoFill);
+document.getElementById('aiGapBtn').addEventListener('click',fillGaps);
 let aiRefURL=null, aiRefFile=null;
 document.getElementById('aiRefBtn').addEventListener('click',()=>{
   const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
   inp.onchange=()=>{ const f=inp.files[0]; if(!f) return; aiRefFile=f;
     const r=new FileReader(); r.onload=()=>{ aiRefURL=r.result;
-      document.getElementById('aiRefStatus').innerHTML='✓ reference loaded — mode <b>R</b> selected. Add a name in "what to draw" (optional), then Generate.';
+      document.getElementById('aiRefStatus').innerHTML='✓ image loaded. <b>★ Auto</b> = search for the best-matching perfect tile; <b>R</b> = fill your current tile with this character. Then Generate.';
       document.getElementById('aiRefClear').style.display='';
-      document.getElementById('aiMode').value='ref';
     }; r.readAsDataURL(f); };
   inp.click();
 });
 document.getElementById('aiRefClear').addEventListener('click',()=>{ aiRefURL=null; aiRefFile=null;
-  document.getElementById('aiRefStatus').innerHTML='For mode <b>R</b>: a character photo/drawing to redraw into your tile. <i>none loaded</i>';
+  document.getElementById('aiRefStatus').innerHTML='Attach an image, then <b>★ Auto</b> matches a perfect tile to it (or <b>R</b> fills your current tile with it). <i>none loaded</i>';
   document.getElementById('aiRefClear').style.display='none'; });
 document.getElementById('aiSubject').addEventListener('input',e=>{
   document.getElementById('aiPrompt').value=defaultPrompt(e.target.value);
@@ -2306,7 +2424,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 31 (2026-07-01)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 32 (2026-07-01)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
