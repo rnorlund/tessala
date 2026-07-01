@@ -1987,22 +1987,26 @@ async function searchBestTile(silPts, opts){
   const types=opts.types||['sqT','rot2','rot3','rot4','hexT','glide'];
   const gopt={wild:0.34,detail:7,lobe:0.5,spike:0.22};
   const seedN=opts.seed||90, iters=opts.iters||2600, topK=opts.topK||3;
+  // Steer toward organic interlocks: penalise the "boring" axis-aligned squares (sqT/rot4),
+  // favour hex/tri/glide which interlock with more neighbours. Only flips near-ties (±few %).
+  const TYPEW={sqT:1.14, rot4:1.08, rot2:1.03, glide:1.00, hexT:0.94, rot3:0.95};
+  const tw=t=>TYPEW[t]||1;
   const yield_=()=>new Promise(r=>setTimeout(r,0));
   const P0=(opts.progBase!=null)?opts.progBase:0.5, P1=(opts.progTop!=null)?opts.progTop:0.95;
   let best={cost:Infinity}; const seeds=[];
   // Phase 1 — seed each symmetry, keep its best starting point
   for(let ti=0; ti<types.length; ti++){ const t=types[ti], P=buildPattern(t); let bt={cost:Infinity};
-    for(let i=0;i<seedN;i++){ const ep=randomGenome(P,gopt); const c=shapeCostTo(outlineOf(P,ep), target);
+    for(let i=0;i<seedN;i++){ const ep=randomGenome(P,gopt); const c=shapeCostTo(outlineOf(P,ep), target)*tw(t);
       if(c<bt.cost) bt={cost:c,type:t,ep}; if(c<best.cost) best={cost:c,type:t,ep}; }
     seeds.push(bt); if(typeof setProg==='function') setProg(P0+(P1-P0)*0.25*(ti+1)/types.length); await yield_();
   }
   seeds.sort((a,b)=>a.cost-b.cost);
   // Phase 2 — anneal the best few basins (accept improvements; occasionally accept worse to escape)
   const kk=Math.min(topK, seeds.length);
-  for(let s=0;s<kk;s++){ const seed=seeds[s]; if(seed.cost===Infinity) continue; const P=buildPattern(seed.type);
+  for(let s=0;s<kk;s++){ const seed=seeds[s]; if(seed.cost===Infinity) continue; const P=buildPattern(seed.type); const w=tw(seed.type);
     let cur={cost:seed.cost, ep:seed.ep}, T=Math.max(seed.cost*0.12, 1e-3);
     for(let i=0;i<iters;i++){
-      const ep=mutate(P, cur.ep, gopt); const c=shapeCostTo(outlineOf(P,ep), target);
+      const ep=mutate(P, cur.ep, gopt); const c=shapeCostTo(outlineOf(P,ep), target)*w;
       if(c<best.cost) best={cost:c, type:seed.type, ep};
       if(c<cur.cost || Math.random()<Math.exp((cur.cost-c)/T)) cur={cost:c, ep};
       T*=0.9985;
@@ -2729,7 +2733,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 36 (2026-07-01)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 37 (2026-07-01)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
