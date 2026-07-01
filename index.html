@@ -377,6 +377,9 @@
             <div class="aiResCol"><canvas id="aiTilePrev" width="200" height="130" class="prevc"></canvas><div class="aiHint">how it tiles</div></div>
           </div>
         </div>
+        <div class="row" style="margin-top:10px"><label>spacing</label><input type="range" id="wizSpacing" min="0" max="0.5" step="0.02" value="0" style="flex:1"></div>
+        <div class="row"><label>gap colour</label><input type="color" id="wizGap" value="#ffffff"></div>
+        <div class="wizHint">Drag <b>spacing</b> up to inset each figure and surround it with the gap colour — <b>guaranteed white space</b>, more legible (works for any render).</div>
         <div class="wizHint">Leftover empty space? <b>🩹 Fill white space</b> grows the figure's hair/limbs into it (repeatable).</div>
         <div class="wizNav">
           <button class="act" id="aiGapBtn">🩹 Fill white space</button>
@@ -1891,8 +1894,14 @@ function resampleClosed(pts, N){
 }
 function centroidOf(p){ let x=0,y=0; for(const q of p){x+=q.x;y+=q.y;} return {x:x/p.length,y:y/p.length}; }
 // normalise points: centre + scale to unit RMS radius (for shape comparison)
-function normShape(p){ const c=centroidOf(p); let s=0; for(const q of p) s+=(q.x-c.x)**2+(q.y-c.y)**2;
-  s=Math.sqrt(s/p.length)||1; return p.map(q=>({x:(q.x-c.x)/s,y:(q.y-c.y)/s})); }
+// centre + rotate to principal axis + scale -> so matching is rotation-aware (a figure at an angle
+// still matches the tile it would fit when rotated). Flip ambiguity is handled by the flip loops.
+function normShape(p){ const c=centroidOf(p);
+  let sxx=0,syy=0,sxy=0; for(const q of p){ const x=q.x-c.x,y=q.y-c.y; sxx+=x*x; syy+=y*y; sxy+=x*y; }
+  const th=0.5*Math.atan2(2*sxy,(sxx-syy)||1e-9), ct=Math.cos(th), st=Math.sin(th);   // major-axis angle
+  const q2=p.map(q=>{ const x=q.x-c.x,y=q.y-c.y; return {x:x*ct+y*st, y:-x*st+y*ct}; }); // rotate by -th
+  let s=0; for(const q of q2) s+=q.x*q.x+q.y*q.y; s=Math.sqrt(s/p.length)||1;
+  return q2.map(q=>({x:q.x/s,y:q.y/s})); }
 // best cyclic alignment of creature loop S to tile loop T (try every shift + both orientations)
 function bestAlign(S, T){
   const N=T.length, ns=normShape(S), nt=normShape(T);
@@ -2115,7 +2124,14 @@ function forcedSymTypes(){ const s=document.getElementById('wizSym'); if(!s) ret
   document.querySelectorAll('#fillLook .fillOpt').forEach(b=>b.addEventListener('click',()=>paint(b.dataset.redraw==='1')));
   const lr=document.getElementById('localRedraw'); if(lr) lr.addEventListener('change',()=>paint(lr.checked)); })();
 function wizDrawBigTile(){ const c=document.getElementById('aiBigTile'); if(!c) return; const x=c.getContext('2d');
-  x.clearRect(0,0,c.width,c.height); try{ x.drawImage(cv,0,0,c.width,c.height); }catch(e){} }
+  x.clearRect(0,0,c.width,c.height); try{ x.drawImage(cv,0,0,c.width,c.height); }catch(e){}
+  const sp=document.getElementById('wizSpacing'); if(sp) sp.value=Math.max(0,Math.min(0.5, 1-(texZoom||1))).toFixed(2); }
+// "spacing" = inset the figure inside its tile (texZoom<1) so the gap colour surrounds it -> guaranteed white space
+(function(){ const sp=document.getElementById('wizSpacing'), gp=document.getElementById('wizGap');
+  if(sp) sp.addEventListener('input',()=>{ texZoom=1-parseFloat(sp.value); const az=document.getElementById('aiZoom'); if(az) az.value=texZoom;
+    buildProcessedTex&&buildProcessedTex(); draw(); const c=document.getElementById('aiBigTile'); if(c){const x=c.getContext('2d');x.clearRect(0,0,c.width,c.height);try{x.drawImage(cv,0,0,c.width,c.height);}catch(e){}} });
+  if(gp) gp.addEventListener('input',()=>{ const g=document.getElementById('gapColor'); if(g) g.value=gp.value; draw();
+    const c=document.getElementById('aiBigTile'); if(c){const x=c.getContext('2d');x.clearRect(0,0,c.width,c.height);try{x.drawImage(cv,0,0,c.width,c.height);}catch(e){}} }); })();
 async function wizRun(){                          // run the pipeline, then show result or stay on error
   document.getElementById('aiMode').value='auto';
   wizStep('3');
@@ -2851,7 +2867,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 40 (2026-07-01)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 41 (2026-07-01)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
