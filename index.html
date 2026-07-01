@@ -276,7 +276,8 @@
       </div>
       <div class="aiAutoRow">
         <select id="aiMode" title="how the picture is used">
-          <option value="redraw" selected>C · Best — reshape tile to figure, then re-draw it in (crisp, 2 calls)</option>
+          <option value="auto" selected>★ Auto — search 1000s of PERFECT tiles for the best fit, then fill (recommended)</option>
+          <option value="redraw">C · Reshape MY tile's pattern to the figure, then re-draw it in</option>
           <option value="outline">A · Keep MY tile → fill with a creature posed to fit it</option>
           <option value="interlock">B · New creature → reshape tile + warp (gapless, 1 call)</option>
           <option value="ref">R · Reference image → redraw THAT character into my tile</option>
@@ -1893,6 +1894,38 @@ function progCreep(base, target, secs){           // asymptotically approach tar
   progTimer=setInterval(()=>{ const t=(performance.now()-t0)/1000;
     setProg(base+(target-base)*(1-Math.exp(-t/(secs/3)))); }, 120);
 }
+// ===== Auto-Escherize: search the space of VALID (perfectly-tiling) tiles for the one
+// whose outline best matches a target silhouette, then that tile is used to fill. Every
+// candidate comes from randomGenome/mutate which only return simple() tiles, so the winner
+// is guaranteed 0-overlap/0-gap — it's the closest PERFECT tile to your idea. =====
+function _shapeTarget(silPts, N){ return { N, norm: normShape(resampleClosed(silPts, N)) }; }
+function shapeCostTo(outPts, target){                 // best cyclic+flip aligned SSD, normalized
+  const N=target.N, o=normShape(resampleClosed(outPts, N));
+  let best=Infinity;
+  for(const flip of [false,true]){
+    const s=flip ? o.map((_,i)=>o[(N-i)%N]) : o;
+    for(let sh=0; sh<N; sh++){ let c=0;
+      for(let i=0;i<N;i++){ const a=s[(i+sh)%N], b=target.norm[i]; c+=(a.x-b.x)**2+(a.y-b.y)**2; if(c>=best) break; }
+      if(c<best) best=c; }
+  }
+  return best;
+}
+// search random valid tiles across the symmetries, keep the best fit, then locally refine it
+function searchBestTile(silPts, opts){
+  opts=opts||{}; const N=48, target=_shapeTarget(silPts, N);
+  const types=opts.types||['sqT','rot2','rot3','rot4','hexT','glide'];
+  const per=opts.per||220, gopt={wild:0.34,detail:6,lobe:0.5,spike:0.22};
+  let best={cost:Infinity};
+  for(const t of types){ const P=buildPattern(t);
+    for(let i=0;i<per;i++){ const ep=randomGenome(P,gopt); const c=shapeCostTo(outlineOf(P,ep), target);
+      if(c<best.cost) best={cost:c, type:t, ep}; } }
+  if(best.cost===Infinity) return null;
+  // local refinement (still only valid tiles): accept mutations that improve the fit
+  const P=buildPattern(best.type); let cur=best;
+  for(let i=0;i<(opts.refine||500);i++){ const ep=mutate(P, cur.ep, gopt); const c=shapeCostTo(outlineOf(P,ep), target);
+    if(c<cur.cost) cur={cost:c, type:best.type, ep}; }
+  return cur;
+}
 function aiStatusText(){
   document.getElementById('aiStatus').textContent =
     texImage ? ('Image loaded ✓ — '+(useTexture?'showing in tiling':'hidden')) : 'No image loaded.';
@@ -1958,7 +1991,7 @@ async function autoFill(){
     } else {
       // clean whole creature on transparent bg (silhouette source for interlock/redraw, or to stamp)
       const prompt=(rich || ('A single stylized '+subject))
-        +((mode==='interlock'||mode==='redraw')
+        +((mode==='interlock'||mode==='redraw'||mode==='auto')
             ? ' One whole subject, limbs/wings/tail tucked or spread to make a full, COMPACT, rounded silhouette that nearly fills the frame with no thin gaps. '
             : ' Centred and filling the frame. ')
         +'Fully transparent background, no scenery, no ground, no text, no shadow — only the subject.';
@@ -1967,7 +2000,7 @@ async function autoFill(){
         body:JSON.stringify({model:'gpt-image-1',prompt,size:'1024x1024',quality,background:'transparent',n:1})});
     }
     if(!res.ok){ let msg; try{msg=(await res.json()).error.message;}catch(e){msg=await res.text();} throw new Error('HTTP '+res.status+' — '+(msg||'').slice(0,200)); }
-    progStop(); setProg(mode==='redraw'?0.5:0.88);
+    progStop(); setProg((mode==='redraw'||mode==='auto')?0.5:0.88);
     const j=await res.json();
     const b64=j.data&&j.data[0]&&j.data[0].b64_json;
     if(!b64) throw new Error('No image returned.');
@@ -1995,15 +2028,24 @@ async function autoFill(){
       status.textContent='✓ Done — preview below. Close to use it, or Generate again.';
       setProg(1); setTimeout(()=>progShow(false), 900);
     };
-    if(mode==='redraw'){
-      // C (best): reshape the tile to the figure's silhouette, then have the AI RE-DRAW the
-      // figure straight into that exact tile (no warp -> no smearing). 2nd API call.
-      status.textContent='🧩 Reshaping the tile to the figure…'; setProg(0.55);
+    if(mode==='redraw' || mode==='auto'){
+      // AUTO: search 1000s of VALID (perfectly-tiling) tiles for the closest fit to the silhouette.
+      // C (redraw): trace the current pattern to the silhouette. Both then AI RE-DRAW into the tile.
+      status.textContent = mode==='auto' ? '🔎 Finding the best perfect tile…' : '🧩 Reshaping the tile to the figure…';
+      setProg(0.55);
       await new Promise((resolve,reject)=>{
         const ci=new Image();
         ci.onload=async ()=>{ try{
-          if(!escherFit(ci,1024)){ reject(new Error('Could not read the figure silhouette — try a bolder subject.')); return; }
-          const shapeBlob=await (await fetch(buildShapePNG())).blob();   // white silhouette of the fitted tile
+          if(mode==='auto'){
+            const cont=alphaContour(ci,1024); if(!cont){ reject(new Error('Could not read the silhouette — try a bolder subject.')); return; }
+            status.textContent='🔎 Searching thousands of perfect tiles for the best fit…';
+            const fit=searchBestTile(resampleClosed(cont,240), {per:170, refine:500});
+            if(!fit){ reject(new Error('No fitting tile found — try again or a bolder subject.')); return; }
+            setPattern(fit.type); edgePts=cloneEp(fit.ep); texFrame=computeTexFrame(buildOutline());
+          } else {
+            if(!escherFit(ci,1024)){ reject(new Error('Could not read the figure silhouette — try a bolder subject.')); return; }
+          }
+          const shapeBlob=await (await fetch(buildShapePNG())).blob();   // white silhouette of the chosen valid tile
           status.textContent='🎨 Re-drawing the figure into the tile… (15–45s)'; progCreep(0.55,0.96,30);
           const body='The white region is a tile shaped like '+subject+'. Draw '+subject+' EXACTLY filling the white silhouette, undistorted and natural, the body following the outline. '
             +(rich||'')+' Thick clean black outlines, bold flat colours. Absolutely NO background; transparent everywhere outside the white shape. Same 1024x1024, do not crop or rescale.';
@@ -2264,7 +2306,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 30 (2026-07-01)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 31 (2026-07-01)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
