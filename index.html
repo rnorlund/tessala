@@ -2639,8 +2639,10 @@ async function autoFromImage(key, quality){
 // extend the figure (hair/cape/limbs/tail) into just those regions. Repeatable.
 async function fillGaps(){
   const status=document.getElementById('aiAutoStatus');
-  const local=(lastGenSource==='local');
   const key=document.getElementById('aiKey').value.trim();
+  // ChatGPT expands the figure into the white FAR better than local inpaint — so if a key is present, prefer it
+  // (even for locally-made tiles). Only fall back to local inpaint when there's no key.
+  const local=(lastGenSource==='local') && !key;
   if(!local && !key){ status.textContent='⚠ Enter your OpenAI API key first (or make the tile with the Local model).'; return; }
   if(!texImage||!texFrame){ status.textContent='Generate or fill a tile first.'; return; }
   const btn=document.getElementById('aiGapBtn'); if(btn) btn.disabled=true;
@@ -2923,7 +2925,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 46 (2026-07-02)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 47 (2026-07-02)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
