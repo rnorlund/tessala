@@ -359,7 +359,28 @@
         <div class="wizTitle">🖼️ Use your own image</div>
         <div id="wizDrop">Drop an image here, or click to choose<br><span style="font-size:11px">a cutout or plain-background picture works best</span></div>
         <input id="wizName" class="wizField" placeholder="name it (optional) — e.g. anime girl, my logo">
-        <div class="wizHint">We read your image's outline, find the best-matching perfect tile, then redraw it to fit. An opaque background is removed automatically.</div>
+        <div class="row" style="margin-top:8px"><label>fit with</label>
+          <div id="imgEngine" style="display:flex;gap:6px;flex:1">
+            <button type="button" class="imgEngOpt" data-eng="local" style="flex:1;padding:7px;border-radius:8px;border:1px solid #6ea8fe;background:#141b2b;color:#eaf1ff;font-size:11px;cursor:pointer;line-height:1.25">🖥️ Local model<br><span style="opacity:.7;font-size:10px">free · fit to your shape</span></button>
+            <button type="button" class="imgEngOpt" data-eng="chatgpt" style="flex:1;padding:7px;border-radius:8px;border:1px solid #2a3348;background:#0c0f16;color:#8a93a6;font-size:11px;cursor:pointer;line-height:1.25">☁️ ChatGPT<br><span style="opacity:.7;font-size:10px">redraw · uses key</span></button>
+          </div></div>
+        <div id="imgLocalRow">
+          <div class="row" style="margin-top:6px"><label>tile</label>
+            <select id="imgSym" class="tbsel">
+              <option value="current" selected>★ My chosen tile — the one on screen</option>
+              <option value="auto">Auto — best-matching interlock for your image</option>
+              <option value="glide">Glide — clean offset rows</option>
+              <option value="rot4">4-fold pinwheel (intricate)</option>
+              <option value="rot3">3-fold rosette (intricate)</option>
+              <option value="hexT">Hexagon</option>
+              <option value="rot2">Upright + upside-down</option>
+              <option value="sqT">Square grid (simplest)</option>
+            </select></div>
+          <div class="wizHint">Reads your image's outline, fits the tile to it, and places your picture crisply — all on-device. Then <b>🩹 Fill</b> (next step) grows it into any gaps with a local model (your Mac, or ⚡ Flux on the Spark). No ChatGPT, no key.</div>
+        </div>
+        <div id="imgChatRow" style="display:none">
+          <div class="wizHint">ChatGPT reads your image's outline, finds the best-matching tile, then redraws it to fit. Needs your OpenAI key.</div>
+        </div>
         <div class="wizNav"><button class="act" data-goto="1">← Back</button><button class="act primary" id="wizGoImage" disabled>Generate →</button></div>
       </div>
 
@@ -2426,9 +2447,65 @@ async function wizRunLocal(subject){
   }catch(err){ progStop(); progShow(false); status.textContent='✗ '+err.message; }
   btn.disabled=false;
 }
+// ── Fit YOUR uploaded image to the chosen tile, fully on-device (no ChatGPT). Reads the outline, fits the
+//    tile to it (or keeps the chosen on-screen tile), places the picture crisply. Gaps → 🩹 (local model).
+async function wizFitImageLocal(){
+  const btn=document.getElementById('wizGoImage'); if(btn) btn.disabled=true;
+  const status=document.getElementById('aiAutoStatus'); wizStep('3'); progShow(true); setProg(0.1);
+  try{
+    if(!aiRefURL) throw new Error('Drop an image first.');
+    const name=(document.getElementById('wizName').value||'').trim()||'your image';
+    status.textContent='🔎 Reading your image…';
+    const src=await loadImg(aiRefURL);
+    let got=await readSil(src);
+    if(!got) throw new Error('Could not read a clear outline — try an image with a plainer background, or a cutout PNG.');
+    const symVal=(document.getElementById('imgSym')||{}).value||'current';
+    let patLabel; setProg(0.4);
+    if(symVal==='current'){
+      texFrame=computeTexFrame(buildOutline());   // keep the exact shape they chose
+      patLabel=(engine==='advanced'&&window.TACT)?('IH'+TACT.tilingTypes[advTypeIndex]):(pat?pat.type:'your tile');
+    }else{
+      status.textContent='🔎 Fitting a tile to your image…';
+      const forced=(symVal==='auto')?null:[symVal];
+      const fit=await searchBestTile(resampleClosed(got.cont,240),{types:forced||undefined,progBase:0.4,progTop:0.75});
+      if(!fit) throw new Error('No fitting tile found — try ★ My chosen tile.');
+      setPattern(fit.type); patLabel=fit.type;
+      if(!escherFit(got.sil,1024)) edgePts=cloneEp(fit.ep);   // reshape the tile TO your image
+      texFrame=computeTexFrame(buildOutline());
+    }
+    lastGenSource='local'; lastGenModel=document.getElementById('wizModel').value; lastGenSubject=name;
+    pushUndo();
+    loadTexFromURL(got.sil.src, ()=>{                          // PLACE the clean image; draw() clips it to the tile
+      useTexture=true; document.getElementById('aiUse').checked=true; document.getElementById('stampMode').checked=false;
+      texZoom=1.0; document.getElementById('aiZoom').value=1.0; tool='pan';
+      document.querySelectorAll('.tool').forEach(x=>x.classList.toggle('on', x.dataset.tool==='pan'));
+      cv.style.cursor='grab'; document.getElementById('shapeHelp').style.display='none';
+      const gp=document.getElementById('wizGap'); document.getElementById('gapColor').value=gp?gp.value:'#ffffff';
+      buildProcessedTex(); aiStatusText(); draw();
+      const cprev=document.getElementById('aiCreaturePrev'); if(cprev){const cx=cprev.getContext('2d');cx.clearRect(0,0,cprev.width,cprev.height);cx.fillStyle='#cfd6e0';cx.fillRect(0,0,cprev.width,cprev.height);try{cx.drawImage(src,0,0,cprev.width,cprev.height);}catch(e){}}
+      const tprev=document.getElementById('aiTilePrev'); if(tprev){const tx=tprev.getContext('2d');tx.clearRect(0,0,tprev.width,tprev.height);try{tx.drawImage(cv,0,0,tprev.width,tprev.height);}catch(e){}}
+      document.getElementById('aiResult').style.display=''; setProg(1); setTimeout(()=>progShow(false),700);
+      wizDrawBigTile(); wizStep('4');
+      status.textContent='✓ Fitted your image to a '+patLabel+' tile (crisp). Click 🩹 to grow it into any gaps with a local model.';
+    });
+  }catch(err){ progStop(); progShow(false); status.textContent='✗ '+err.message; }
+  if(btn) btn.disabled=false;
+}
+let imgEng='local';   // 'local' (fit my image on-device) | 'chatgpt' (redraw via key)
+(function(){ const wrap=document.getElementById('imgEngine'); if(!wrap) return;
+  wrap.querySelectorAll('.imgEngOpt').forEach(btn=>btn.addEventListener('click',()=>{
+    imgEng=btn.dataset.eng;
+    wrap.querySelectorAll('.imgEngOpt').forEach(b=>{ const on=b.dataset.eng===imgEng;
+      b.style.borderColor=on?'#6ea8fe':'#2a3348'; b.style.background=on?'#141b2b':'#0c0f16'; b.style.color=on?'#eaf1ff':'#8a93a6'; });
+    const lr=document.getElementById('imgLocalRow'), cr=document.getElementById('imgChatRow');
+    if(lr) lr.style.display = imgEng==='local'?'':'none';
+    if(cr) cr.style.display = imgEng==='chatgpt'?'':'none';
+  }));
+})();
 document.getElementById('wizGoImage').addEventListener('click',()=>{
   if(!aiRefFile) return;
   document.getElementById('aiSubjectA').value=document.getElementById('wizName').value||'';
+  if(imgEng==='local'){ wizFitImageLocal(); return; }
   wizRun();
 });
 document.getElementById('wizAgain').addEventListener('click',()=>wizStep('1'));
@@ -3020,7 +3097,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 49 (2026-07-02)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 50 (2026-07-02)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
