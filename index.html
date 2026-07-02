@@ -387,7 +387,9 @@
         <div class="row" style="margin-top:10px"><label>spacing</label><input type="range" id="wizSpacing" min="0" max="0.5" step="0.02" value="0" style="flex:1"></div>
         <div class="row"><label>gap colour</label><input type="color" id="wizGap" value="#ffffff"></div>
         <div class="wizHint">Drag <b>spacing</b> up to inset each figure and surround it with the gap colour — <b>guaranteed white space</b>, more legible (works for any render).</div>
-        <div class="wizHint">Leftover empty space? <b>🩹 Fill white space</b> grows the figure into it (repeatable).</div>
+        <div class="wizHint">Leftover empty space? <b>🩹 Fill white space</b> grows the figure into it (repeatable). Default engine: <b>ChatGPT</b> (~15s, needs key) or your local model.</div>
+        <label class="chk" style="font-size:11px;margin:2px 0 0"><input type="checkbox" id="useFlux"> ⚡ Use local <b>Flux-Fill on the Spark</b> instead — free, no key (but slow, ~6 min)</label>
+        <div id="fluxHint" class="wizHint" style="display:none"></div>
         <div id="aiGapBusy" style="display:none;margin:8px 0">
           <div style="height:8px;border-radius:5px;background:#1c1f26;border:1px solid var(--line);overflow:hidden">
             <div id="aiGapBar" style="height:100%;width:0%;background:linear-gradient(90deg,#3a6ea5,#6ea8fe);transition:width .3s ease"></div>
@@ -2238,16 +2240,18 @@ function blobToDataURL(blob){ return new Promise(res=>{ const fr=new FileReader(
 // POST a ComfyUI graph, poll /history, return the output image as a dataURL
 async function comfyRun(g, prog){
   const url=comfyURL(), cid='tess'+Math.random().toString(36).slice(2);
+  const maxIters=(prog&&prog.max)||220;              // polls × 1.5s = timeout ceiling (default 5.5 min)
+  const creepPolls=(prog&&prog.polls)||38;           // poll at which the bar reaches p1 (~57s default)
   let pr; try{ pr=await fetch(url+'/prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:g,client_id:cid})}); }
   catch(e){ throw new Error('Local ComfyUI not reachable at '+url+' — run ugi/start-comfy-cors.command (it must allow CORS).'); }
   if(!pr.ok){ let m; try{m=JSON.stringify((await pr.json()).error||'');}catch(e){m=''} throw new Error('ComfyUI rejected the job (HTTP '+pr.status+') '+m.slice(0,140)); }
   const pid=(await pr.json()).prompt_id;
-  for(let i=0;i<220;i++){ await new Promise(r=>setTimeout(r,1500));
+  for(let i=0;i<maxIters;i++){ await new Promise(r=>setTimeout(r,1500));
     const h=await (await fetch(url+'/history/'+pid,{cache:'no-store'})).json();
     const rec=h[pid]; if(rec&&rec.outputs){ for(const nid in rec.outputs){ const im=rec.outputs[nid].images;
       if(im&&im.length){ const q=new URLSearchParams({filename:im[0].filename,subfolder:im[0].subfolder||'',type:im[0].type||'output'});
         const blob=await (await fetch(url+'/view?'+q)).blob(); return blobToDataURL(blob); } } }
-    if(prog && typeof setProg==='function') setProg(prog.p0+(prog.p1-prog.p0)*Math.min(1,i/38));
+    if(prog && typeof setProg==='function') setProg(prog.p0+(prog.p1-prog.p0)*Math.min(1,i/creepPolls));
   }
   throw new Error('Local render timed out.');
 }
@@ -2278,6 +2282,29 @@ async function comfyInpaint(baseURL, maskWhiteURL, subject, model, denoise){
     "9":{class_type:"SaveImage",inputs:{filename_prefix:"tessip",images:["8",0]}}
   };
   return comfyRun(g, {p0:0.5, p1:0.9});
+}
+// FLUX-FILL inpaint (Spark only): highest-quality local expand — extends the figure into the white mask.
+// Slow on the GB10 (~6 min) but 100% local/free. baseURL = figure on white; maskWhiteURL = WHITE where to fill.
+async function comfyFluxFill(baseURL, maskWhiteURL, subject){
+  const baseName=await comfyUpload(baseURL,'fluxbase.png'), maskName=await comfyUpload(maskWhiteURL,'fluxmask.png');
+  const seed=Math.floor(Math.random()*1e15);
+  const pos='flat vector sticker of '+(subject||'the figure')+', extend it to completely fill the shape, bold flat solid colours, thick clean black outline, no background';
+  const g={
+    "u":{class_type:"UNETLoader",inputs:{unet_name:"flux1-fill-dev.safetensors",weight_dtype:"fp8_e4m3fn"}},
+    "c":{class_type:"DualCLIPLoader",inputs:{clip_name1:"t5xxl_fp8_e4m3fn_scaled.safetensors",clip_name2:"clip_l.safetensors",type:"flux"}},
+    "vae":{class_type:"VAELoader",inputs:{vae_name:"flux_ae.safetensors"}},
+    "pos":{class_type:"CLIPTextEncode",inputs:{text:pos,clip:["c",0]}},
+    "neg":{class_type:"CLIPTextEncode",inputs:{text:"",clip:["c",0]}},
+    "img":{class_type:"LoadImage",inputs:{image:baseName}},
+    "mimg":{class_type:"LoadImage",inputs:{image:maskName}},
+    "m2m":{class_type:"ImageToMask",inputs:{image:["mimg",0],channel:"red"}},
+    "fg":{class_type:"FluxGuidance",inputs:{conditioning:["pos",0],guidance:30}},
+    "inp":{class_type:"InpaintModelConditioning",inputs:{positive:["fg",0],negative:["neg",0],vae:["vae",0],pixels:["img",0],mask:["m2m",0],noise_mask:true}},
+    "k":{class_type:"KSampler",inputs:{seed,steps:20,cfg:1.0,sampler_name:"euler",scheduler:"normal",denoise:1.0,model:["u",0],positive:["inp",0],negative:["inp",1],latent_image:["inp",2]}},
+    "dec":{class_type:"VAEDecode",inputs:{samples:["k",0],vae:["vae",0]}},
+    "save":{class_type:"SaveImage",inputs:{filename_prefix:"fluxfill",images:["dec",0]}}
+  };
+  return comfyRun(g, {p0:0.08, p1:0.95, polls:260, max:440});   // GB10 Flux ≈ 6–7 min: creep→95% at ~6.5 min, 11-min ceiling
 }
 // pick a VALID, interlocking tile of a symmetry (no figure needed) — used by the robust redraw path.
 // randomGenome only ever returns simple() (perfectly-tiling) tiles; we keep the wiggliest = most interlocking.
@@ -2690,17 +2717,19 @@ async function fillGaps(){
   const key=document.getElementById('aiKey').value.trim();
   // ChatGPT expands the figure into the white FAR better than local inpaint — so if a key is present, prefer it
   // (even for locally-made tiles). Only fall back to local inpaint when there's no key.
-  const local=(lastGenSource==='local') && !key;
-  if(!local && !key){ status.textContent='⚠ Enter your OpenAI API key first (or make the tile with the Local model).'; return; }
+  const useFlux = !!(document.getElementById('useFlux') && document.getElementById('useFlux').checked);
+  const local = useFlux || ((lastGenSource==='local') && !key);   // Flux + local both use the white-base / white-mask path
+  if(!useFlux && !local && !key){ status.textContent='⚠ Enter your OpenAI key, or tick ⚡ local Flux (Spark), or make the tile locally.'; return; }
   if(!texImage||!texFrame){ status.textContent='Generate or fill a tile first.'; return; }
   const btn=document.getElementById('aiGapBtn'), gbusy=document.getElementById('aiGapBusy'), gstat=document.getElementById('aiGapStatus');
-  const eng=local?'the local model':'ChatGPT';
+  const eng = useFlux ? 'Flux-Fill on the Spark' : (local?'the local model':'ChatGPT');
+  const eta = useFlux ? '~6 min · free' : (local?'20–50s':'10–35s');
   const say=t=>{ status.textContent=t; if(gstat) gstat.textContent=t; };
   const finish=(t,ok)=>{ progStop(); setProg(1); setTimeout(()=>{ if(gbusy) gbusy.style.display='none'; progShow(false); }, ok?700:200);
     if(btn){ btn.disabled=false; btn.textContent='🩹 Fill white space'; } say(t); };
   if(btn){ btn.disabled=true; btn.textContent='⏳ Filling…'; } if(gbusy) gbusy.style.display='';
-  progShow(true); setProg(0.08); if(!local) progCreep(0.08,0.9,22);
-  say('🩹 Expanding the figure into the white with '+eng+'… ('+(local?'20–50s':'10–35s')+')');
+  progShow(true); setProg(0.08); if(!local) progCreep(0.08,0.9,22);   // Flux/local: comfyRun drives the bar; ChatGPT: creep
+  say('🩹 Expanding the figure into the white with '+eng+'… ('+eta+')');
   try{
     const RES=1024;
     // current fill, drawn exactly as it appears (honouring texZoom / nudge)
@@ -2726,9 +2755,11 @@ async function fillGaps(){
       if(fill) empty++; }
     mc.putImageData(mim,0,0); mcW.putImageData(wim,0,0);
     if(empty < RES*RES*0.004){ finish('✓ Tile is already full — no white space left.', false); return; }
-    say('🎨 Expanding the figure into the white with '+eng+'… ('+(local?'20–50s':'10–35s')+')');
+    say('🎨 Expanding the figure into the white with '+eng+'… ('+eta+')');
     let resURL;
-    if(local){
+    if(useFlux){
+      resURL = await comfyFluxFill(fc.toDataURL('image/png'), mkW.toDataURL('image/png'), lastGenSubject);
+    } else if(local){
       resURL = await comfyInpaint(fc.toDataURL('image/png'), mkW.toDataURL('image/png'), lastGenSubject, lastGenModel, 1.0);
     } else {
       const imgBlob=await (await fetch(fc.toDataURL('image/png'))).blob();
@@ -2764,6 +2795,18 @@ document.getElementById('btnAI').addEventListener('click',openAI);
 document.getElementById('aiClose').addEventListener('click',closeAI);
 document.getElementById('aiAutoBtn').addEventListener('click',autoFill);
 document.getElementById('aiGapBtn').addEventListener('click',fillGaps);
+document.getElementById('useFlux').addEventListener('change',function(){
+  const h=document.getElementById('fluxHint'); if(!h) return;
+  if(!this.checked){ h.style.display='none'; return; }
+  const u=comfyURL(); h.style.display='';
+  if(/:8189\b/.test(u)){                                   // :8189 = the Mac (no Flux-Fill there)
+    h.style.color='#e0b070';
+    h.innerHTML='⚠ Backend is <b>'+u+'</b> — that’s your Mac, which has no Flux-Fill. Point the backend box at the Spark (…:8188) first.';
+  } else {
+    h.style.color='';
+    h.innerHTML='⚡ Flux-Fill will run on <b>'+u+'</b> (~6 min).';
+  }
+});
 let aiRefURL=null, aiRefFile=null;
 document.getElementById('aiRefBtn').addEventListener('click',()=>{
   const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
@@ -2977,7 +3020,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 48 (2026-07-02)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 49 (2026-07-02)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
