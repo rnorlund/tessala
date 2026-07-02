@@ -314,32 +314,32 @@
       <!-- STEP 2a · prompt (Local or ChatGPT) -->
       <div class="wizStep" data-step="2a" style="display:none">
         <div class="wizTitle" id="wizPromptTitle">✍️ What should it be?</div>
-        <input id="aiSubjectA" class="wizField" placeholder="e.g. a koi fish · a barn owl · a bat · a beetle">
-        <div class="wizHint">Compact, bold subjects tile best (fish, bird, bat, leaf, beetle, hand). Long thin things fit worse.</div>
+        <input id="aiSubjectA" class="wizField" value="a fox" placeholder="e.g. a koi fish · a barn owl · a bat · a beetle">
+        <div class="wizHint">Compact, bold subjects tile best (fox, owl, rhino, whale, turtle, bird). Long thin things fit worse.</div>
         <div class="row" style="margin-top:6px"><label>tile pattern</label>
           <select id="wizSym" class="tbsel">
-            <option value="auto" selected>Auto — favour complex interlocks</option>
+            <option value="glide" selected>Glide rows — clean whole figures (recommended)</option>
+            <option value="auto">Auto — favour complex interlocks</option>
             <option value="current">★ My current tile — the one on screen (81-gallery / starter)</option>
             <option value="rot4">4-fold pinwheel (intricate)</option>
             <option value="rot3">3-fold rosette (intricate)</option>
             <option value="hexT">Hexagon</option>
             <option value="rot2">2-fold</option>
-            <option value="glide">Glide row (simple)</option>
             <option value="sqT">Square grid (simplest)</option>
           </select></div>
-        <div class="wizHint">Auto leans toward rotational pinwheels (rot3/rot4) — the intricate Escher look. Force a pattern here to override.</div>
+        <div class="wizHint"><b>Glide</b> = clean offset rows of whole figures (the reference look). <b>Auto/rot3/rot4</b> = intricate interlocks (busier). </div>
         <div class="row" style="margin-top:8px"><label>fill look</label>
           <div id="fillLook" style="display:flex;gap:6px;flex:1">
-            <button type="button" class="fillOpt" data-redraw="1" style="flex:1;padding:7px;border-radius:8px;border:1px solid #6ea8fe;background:#141b2b;color:#eaf1ff;font-size:11px;cursor:pointer;line-height:1.25">◆ Gap-free<br><span style="opacity:.7;font-size:10px">redraw · dense</span></button>
-            <button type="button" class="fillOpt" data-redraw="0" style="flex:1;padding:7px;border-radius:8px;border:1px solid #2a3348;background:#0c0f16;color:#8a93a6;font-size:11px;cursor:pointer;line-height:1.25">◇ Keep my drawing<br><span style="opacity:.7;font-size:10px">crisp whole figures</span></button>
+            <button type="button" class="fillOpt" data-redraw="1" style="flex:1;padding:7px;border-radius:8px;border:1px solid #2a3348;background:#0c0f16;color:#8a93a6;font-size:11px;cursor:pointer;line-height:1.25">◆ Gap-free<br><span style="opacity:.7;font-size:10px">redraw · dense</span></button>
+            <button type="button" class="fillOpt" data-redraw="0" style="flex:1;padding:7px;border-radius:8px;border:1px solid #6ea8fe;background:#141b2b;color:#eaf1ff;font-size:11px;cursor:pointer;line-height:1.25">◇ Keep my drawing<br><span style="opacity:.7;font-size:10px">crisp whole figures</span></button>
           </div></div>
         <div class="wizHint"><b>Gap-free</b> redraws the figure to fill every pixel (dense interlock). <b>Keep my drawing</b> places your exact clean drawing into a creature-shaped tile — crisp, recognisable whole figures (best for clean results; pair with <b>Glide</b> for reference-style offset rows).</div>
         <div id="wizLocalRow" style="display:none">
           <div class="row" style="margin-top:6px"><label>local model</label>
             <select id="wizModel" class="tbsel">
-              <option value="ponyDiffusionV6XL_v6StartWithThisOne.safetensors">Pony XL — anime</option>
-              <option value="lustifySDXLNSFWSFW_v20.safetensors">Lustify XL — realistic</option>
-              <option value="bigasp_v20.safetensors">BigASP v2 — photoreal</option>
+              <option value="lustifySDXLNSFWSFW_v20.safetensors" selected>Lustify XL — clean (recommended)</option>
+              <option value="bigasp_v20.safetensors">BigASP v2 — bold &amp; simple</option>
+              <option value="ponyDiffusionV6XL_v6StartWithThisOne.safetensors">Pony XL — anime (busier)</option>
             </select></div>
           <div class="wizHint" id="wizLocalStat">Checking local ComfyUI…</div>
         </div>
@@ -402,7 +402,7 @@
       </div>
       <div class="row"><label>output quality</label>
         <select id="aiQualityUI" class="tbsel"><option value="low">low · cheapest</option><option value="medium">medium</option><option value="high" selected>high · best</option></select></div>
-      <label class="chk" style="margin-top:8px"><input type="checkbox" id="localRedraw" checked> Local finish: <b>redraw into tile</b> (true gap-free interlock) — uncheck to <b>warp&nbsp;+&nbsp;fill</b> (keeps your exact source image, may leave gaps)</label>
+      <label class="chk" style="margin-top:8px"><input type="checkbox" id="localRedraw"> Local finish: check for <b>gap-free redraw</b> (dense) — unchecked = <b>keep my drawing</b> (place the clean figure, crisp; the default)</label>
       <label class="chk" style="margin-top:8px"><input type="checkbox" id="aiUse" checked> Use AI image as fill</label>
       <div class="row"><label>fit zoom</label><input type="range" id="aiZoom" min="0.5" max="2.6" step="0.02" value="1"></div>
       <div class="row"><label>nudge ↔</label><input type="range" id="aiOffX" min="-0.5" max="0.5" step="0.01" value="0"></div>
@@ -2127,7 +2127,7 @@ function forcedSymTypes(){ const s=document.getElementById('wizSym'); if(!s) ret
     document.querySelectorAll('#fillLook .fillOpt').forEach(x=>{ const on=(x.dataset.redraw==='1')===redraw;
       x.style.borderColor=on?'#6ea8fe':'#2a3348'; x.style.background=on?'#141b2b':'#0c0f16'; x.style.color=on?'#eaf1ff':'#8a93a6'; }); };
   document.querySelectorAll('#fillLook .fillOpt').forEach(b=>b.addEventListener('click',()=>paint(b.dataset.redraw==='1')));
-  const lr=document.getElementById('localRedraw'); if(lr) lr.addEventListener('change',()=>paint(lr.checked)); })();
+  const lr=document.getElementById('localRedraw'); if(lr){ lr.addEventListener('change',()=>paint(lr.checked)); paint(lr.checked); } })();  // sync buttons to default on load
 function wizDrawBigTile(){ const c=document.getElementById('aiBigTile'); if(!c) return; const x=c.getContext('2d');
   x.clearRect(0,0,c.width,c.height); try{ x.drawImage(cv,0,0,c.width,c.height); }catch(e){}
   const sp=document.getElementById('wizSpacing'); if(sp) sp.value=Math.max(0,Math.min(0.5, 1-(texZoom||1))).toFixed(2); }
@@ -2923,7 +2923,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 45 (2026-07-02)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 46 (2026-07-02)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
