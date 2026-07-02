@@ -385,7 +385,7 @@
             </select></div>
           <div class="row" style="margin-top:6px;align-items:flex-start"><label style="padding-top:6px">fit prompt</label>
             <textarea id="imgPrompt" class="wizField" rows="2" style="margin:0;resize:vertical;line-height:1.3">creatively reshaped to completely fill the tile — intelligently expand, shrink and rearrange its parts to reach every edge and corner, decorative and interlocking; abstract is fine</textarea></div>
-          <div class="wizHint">Your image is warped into the tile shape and handed to your local model <b>together with the tile-shape mask</b>; it re-renders only inside the shape, creatively reshaping your picture to fill it (keeps its colours; edges stay clean). The line above is the instruction — edit it freely. Then <b>🩹 Fill</b> cleans up any leftover gaps.</div>
+          <div class="wizHint">Your image is warped into the tile shape and re-rendered to fill it. On the <b>Spark</b> the model uses <b>IP-Adapter</b> — it actually looks at your picture as a reference (best identity), like ChatGPT does; on the Mac it redraws from the warp. Edit the instruction above freely. Then <b>🩹 Fill</b> cleans up any leftover gaps.</div>
         </div>
         <div id="imgChatRow" style="display:none">
           <div class="wizHint">ChatGPT reads your image's outline, finds the best-matching tile, then redraws it to fit. Needs your OpenAI key.</div>
@@ -2365,7 +2365,46 @@ async function comfyFitToMask(baseURL, maskWhiteURL, subject, model, denoise, pr
   };
   return comfyRun(g, {p0:0.45, p1:0.9});
 }
+// TRUE reference fit (IP-Adapter, Spark): the model actually LOOKS at your picture (via CLIP-vision + IP-Adapter)
+// while it re-renders inside the tile-shape mask — so identity/colours transfer like ChatGPT's multi-image edit,
+// but fully local. base = your picture warped into the tile (composition hint); ref = your original picture.
+async function comfyIPAdapterFit(baseURL, maskWhiteURL, refURL, subject, model, denoise, promptOverride){
+  const pony=/pony/i.test(model);
+  const baseName=await comfyUpload(baseURL,'tessipabase.png'), maskName=await comfyUpload(maskWhiteURL,'tessipamask.png'), refName=await comfyUpload(refURL,'tessiparef.png');
+  const pos=(pony?'score_9, score_8_up, score_7_up, ':'')+(promptOverride || ((subject||'the subject')+', creatively reshaped to completely fill the shape'))+', bold flat solid colours, thick clean black outline, cel shaded, no gradient, no shadow';
+  const neg=(pony?'score_6, score_5, ':'')+'photo, realistic, 3d, gradient, soft shadow, seam, border, frame, text, watermark, cropped';
+  const seed=Math.floor(Math.random()*1e15);
+  const g={
+    "4":{class_type:"CheckpointLoaderSimple",inputs:{ckpt_name:model}},
+    "ipm":{class_type:"IPAdapterModelLoader",inputs:{ipadapter_file:"ip-adapter-plus_sdxl_vit-h.safetensors"}},
+    "cv":{class_type:"CLIPVisionLoader",inputs:{clip_name:"CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"}},
+    "ref":{class_type:"LoadImage",inputs:{image:refName}},
+    "ipa":{class_type:"IPAdapterAdvanced",inputs:{model:["4",0],ipadapter:["ipm",0],image:["ref",0],clip_vision:["cv",0],weight:0.85,weight_type:"style and composition",combine_embeds:"concat",start_at:0.0,end_at:1.0,embeds_scaling:"V only"}},
+    "6":{class_type:"CLIPTextEncode",inputs:{text:pos,clip:["4",1]}},
+    "7":{class_type:"CLIPTextEncode",inputs:{text:neg,clip:["4",1]}},
+    "10":{class_type:"LoadImage",inputs:{image:baseName}},
+    "enc":{class_type:"VAEEncode",inputs:{pixels:["10",0],vae:["4",2]}},
+    "11":{class_type:"LoadImage",inputs:{image:maskName}},
+    "12":{class_type:"ImageToMask",inputs:{image:["11",0],channel:"red"}},
+    "nm":{class_type:"SetLatentNoiseMask",inputs:{samples:["enc",0],mask:["12",0]}},
+    "3":{class_type:"KSampler",inputs:{seed,steps:26,cfg:6.5,sampler_name:"dpmpp_2m",scheduler:"karras",denoise:(denoise||0.8),model:["ipa",0],positive:["6",0],negative:["7",0],latent_image:["nm",0]}},
+    "8":{class_type:"VAEDecode",inputs:{samples:["3",0],vae:["4",2]}},
+    "9":{class_type:"SaveImage",inputs:{filename_prefix:"tessipa",images:["8",0]}}
+  };
+  return comfyRun(g, {p0:0.45, p1:0.9});
+}
 async function comfyReachable(){ try{ const r=await fetch(comfyURL()+'/system_stats',{cache:'no-store'}); return r.ok; }catch(e){ return false; } }
+// is a node class installed on the current backend? (used to auto-detect IP-Adapter on the Spark)
+async function comfyHasNode(name){ try{ const r=await fetch(comfyURL()+'/object_info/'+name,{cache:'no-store'}); if(!r.ok) return false; const j=await r.json(); return !!j[name]; }catch(e){ return false; } }
+// pick a valid SDXL checkpoint on the current backend (prefer `preferred`; never pick a Flux checkpoint for IP-Adapter)
+async function pickBackendCheckpoint(preferred){
+  try{ const r=await fetch(comfyURL()+'/object_info/CheckpointLoaderSimple',{cache:'no-store'}); const j=await r.json();
+    const list=j.CheckpointLoaderSimple.input.required.ckpt_name[0];
+    if(preferred && list.includes(preferred)) return preferred;
+    const score=n=>/flux|schnell/i.test(n)?99:/lustify/i.test(n)?0:/juggernaut/i.test(n)?1:/realvis|epicreal|helloworld/i.test(n)?2:/bigasp/i.test(n)?3:5;
+    return list.slice().sort((a,b)=>score(a)-score(b))[0]||preferred;
+  }catch(e){ return preferred; }
+}
 // composite an alpha image (transparent outside the tile) onto a white square — SDXL img2img needs opaque pixels.
 function onWhite(url, res){ return new Promise(async res2=>{ const im=await loadImg(url);
   const c=document.createElement('canvas'); c.width=c.height=res||1024; const x=c.getContext('2d');
@@ -2506,7 +2545,7 @@ async function wizFitImageLocal(){
     if(!got) throw new Error('Could not read a clear outline — try an image with a plainer background, or a cutout PNG.');
     const symVal=(document.getElementById('imgSym')||{}).value||'current';
     const model=document.getElementById('wizModel').value;
-    let patLabel, resURL, artistic=false; setProg(0.4);
+    let patLabel, resURL, artistic=false, fitEngine=''; setProg(0.4);
     if(symVal==='current'){
       // FIT YOUR IMAGE TO THE CHOSEN TILE: warp it into the tile's shape (positions your content across the
       // tile), then hand the local model BOTH that base AND the tile-shape mask — it re-renders only inside
@@ -2521,10 +2560,21 @@ async function wizFitImageLocal(){
         // mask = the tile shape (WHITE = the model works here; black outside stays as the white base)
         const mk=document.createElement('canvas'); mk.width=mk.height=RES; const mc=mk.getContext('2d');
         mc.fillStyle='#000'; mc.fillRect(0,0,RES,RES); paintShape(mc, texFrame, RES, {fill:'#ffffff'});
+        const mkURL=mk.toDataURL('image/png');
         const instr=(document.getElementById('imgPrompt')&&document.getElementById('imgPrompt').value.trim())||FIT_PROMPT_DEFAULT;
         const prompt=name+', '+instr;
-        status.textContent='🎨 '+model.replace(/\.(safetensors|ckpt|sft)$/,'').slice(0,22)+' is artistically fitting your image into the tile… (20–50s)';
-        resURL=await comfyFitToMask(warpedW, mk.toDataURL('image/png'), name, model, 0.6, prompt); progStop(); artistic=true;
+        const hasIPA=await comfyHasNode('IPAdapterModelLoader');   // Spark has IP-Adapter → true reference fit
+        if(hasIPA){
+          const useModel=await pickBackendCheckpoint(model);
+          status.textContent='🎯 '+useModel.replace(/\.(safetensors|ckpt|sft)$/,'').slice(0,20)+' + IP-Adapter is fitting your image (using it as a reference)… (20–50s)';
+          resURL=await comfyIPAdapterFit(warpedW, mkURL, aiRefURL, name, useModel, 0.8, prompt);
+          fitEngine='IP-Adapter reference';
+        }else{
+          status.textContent='🎨 '+model.replace(/\.(safetensors|ckpt|sft)$/,'').slice(0,22)+' is artistically fitting your image into the tile… (20–50s)';
+          resURL=await comfyFitToMask(warpedW, mkURL, name, model, 0.6, prompt);
+          fitEngine='local redraw';
+        }
+        progStop(); artistic=true;
       }else{
         resURL=warpedW;   // graceful fallback: geometric warp only (start ComfyUI for the artistic pass)
         status.textContent='⚠ Local model not reachable — placed the warped image. Start ComfyUI for the artistic fit.';
@@ -2553,7 +2603,7 @@ async function wizFitImageLocal(){
       document.getElementById('aiResult').style.display=''; setProg(1); setTimeout(()=>progShow(false),700);
       wizDrawBigTile(); wizStep('4');
       status.textContent = artistic
-        ? '✓ '+model.replace(/\.(safetensors|ckpt|sft)$/,'').slice(0,22)+' fitted your image into the '+patLabel+' tile. Click 🩹 to fill any gaps.'
+        ? '✓ Fitted your image into the '+patLabel+' tile ('+fitEngine+'). Click 🩹 to fill any gaps.'
         : '✓ Fitted your image to a '+patLabel+' tile (crisp). Click 🩹 to grow it into any gaps with a local model.';
     });
   }catch(err){ progStop(); progShow(false); status.textContent='✗ '+err.message; }
@@ -2654,7 +2704,7 @@ async function autoFill(){
       fd.append('model','gpt-image-1');
       fd.append('image[]', shapeBlob, 'shape.png');
       fd.append('image[]', aiRefFile, aiRefFile.name||'ref.png');
-      fd.append('prompt','The FIRST image is a white tile silhouette (transparent outside). The SECOND image shows '+(who||'a character')+'. Redraw THAT SAME character — same hair, face, clothing and colours — re-posed and bent so the body COMPLETELY fills the white silhouette to every edge, undistorted and natural, leaving NO transparent gaps inside the shape. Thick clean black outlines, bold flat colours. Transparent everywhere outside the white silhouette. Output 1024x1024.');
+      fd.append('prompt','The FIRST image is a white tile silhouette (transparent outside). The SECOND image shows '+(who||'a character')+'. Fit THAT subject to completely fill the white silhouette — intelligently choose how: expand, shrink, bend and rearrange its parts creatively so it reaches every edge and corner with NO transparent gaps inside the shape. Keep its colours and character recognizable, but the result may be stylized or abstract. Thick clean black outlines, bold flat colours. Transparent everywhere outside the white silhouette. Output 1024x1024.');
       fd.append('size','1024x1024'); fd.append('quality', quality); fd.append('background','transparent'); fd.append('n','1');
       res=await fetch('https://api.openai.com/v1/images/edits',{method:'POST',headers:{Authorization:'Bearer '+key},body:fd});
     } else if(mode==='outline'){
@@ -2866,7 +2916,7 @@ async function autoFromImage(key, quality){
     const who=(document.getElementById('aiSubjectA').value||'').trim();
     const fd=new FormData(); fd.append('model','gpt-image-1');
     fd.append('image[]', shapeBlob, 'shape.png'); fd.append('image[]', aiRefFile, aiRefFile.name||'ref.png');
-    fd.append('prompt','The FIRST image is a white tile silhouette (transparent outside). The SECOND shows '+(who||'a character')+'. Redraw THAT SAME character — same hair, face, clothing and colours — re-posed and bent so its body COMPLETELY fills the white silhouette to every edge, undistorted, leaving NO empty space inside. Thick clean black outlines, bold flat colours, transparent outside the shape. Output 1024x1024.');
+    fd.append('prompt','The FIRST image is a white tile silhouette (transparent outside). The SECOND shows '+(who||'a character')+'. Fit THAT subject to completely fill the white silhouette — intelligently choose how: expand, shrink, bend and rearrange its parts creatively so it reaches every edge and corner with NO empty space inside. Keep its colours and character recognizable, but it may be stylized or abstract. Thick clean black outlines, bold flat colours, transparent outside the shape. Output 1024x1024.');
     fd.append('size','1024x1024'); fd.append('quality', quality); fd.append('background','transparent'); fd.append('n','1');
     const r=await fetch('https://api.openai.com/v1/images/edits',{method:'POST',headers:{Authorization:'Bearer '+key},body:fd});
     progStop(); setProg(0.95);
@@ -3198,7 +3248,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 51 (2026-07-02)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 52 (2026-07-02)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
