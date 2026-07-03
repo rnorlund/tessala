@@ -1948,19 +1948,27 @@ function principalAlign(q){ let sxx=0,syy=0,sxy=0; for(const p of q){ sxx+=p.x*p
   const th=0.5*Math.atan2(2*sxy,(sxx-syy)||1e-9), c=Math.cos(th), s=Math.sin(th);
   return q.map(p=>({x:p.x*c+p.y*s, y:-p.x*s+p.y*c})); }
 // best cyclic alignment of creature loop S to tile loop T (try every shift + both orientations)
-function bestAlign(S, T){
-  const N=T.length, ns=normShape(S), nt=normShape(T);
-  let best={cost:Infinity, shift:0, flip:false};
-  for(const flip of [false,true]){
-    const s=flip? ns.map((_,i)=>ns[(N-i)%N]) : ns;
-    for(let sh=0; sh<N; sh++){
-      let cost=0;
-      for(let i=0;i<N;i++){ const a=s[(i+sh)%N], b=nt[i]; cost+=(a.x-b.x)**2+(a.y-b.y)**2; if(cost>best.cost) break; }
-      if(cost<best.cost) best={cost,shift:sh,flip};
+function rotatePts(pts, ang){ const c=centroidOf(pts), co=Math.cos(ang), s=Math.sin(ang);
+  return pts.map(p=>{ const dx=p.x-c.x, dy=p.y-c.y; return {x:c.x+dx*co-dy*s, y:c.y+dx*s+dy*co}; }); }
+// align loop S to loop T. allowRotate: also search whole-image ROTATIONS (so the picture TILTS to fit the
+// tile's orientation, not just cyclic-shifts). Returns S reordered+rotated to correspond index-for-index with T.
+function bestAlign(S, T, allowRotate){
+  const N=T.length, nt=normShape(T);
+  const rots = allowRotate ? Array.from({length:24},(_,i)=>i*Math.PI/12) : [0];   // every 15°
+  let best={cost:Infinity, shift:0, flip:false, rot:0};
+  for(const rot of rots){
+    const ns = normShape(rot? rotatePts(S,rot) : S);
+    for(const flip of [false,true]){
+      const s=flip? ns.map((_,i)=>ns[(N-i)%N]) : ns;
+      for(let sh=0; sh<N; sh++){
+        let cost=0;
+        for(let i=0;i<N;i++){ const a=s[(i+sh)%N], b=nt[i]; cost+=(a.x-b.x)**2+(a.y-b.y)**2; if(cost>best.cost) break; }
+        if(cost<best.cost) best={cost,shift:sh,flip,rot};
+      }
     }
   }
-  // return S reordered to correspond index-for-index with T
-  let s=best.flip? S.map((_,i)=>S[(N-i)%N]) : S.slice();
+  let Sb = best.rot? rotatePts(S, best.rot) : S.slice();       // apply the winning rotation to the real points
+  let s = best.flip? Sb.map((_,i)=>Sb[(N-i)%N]) : Sb.slice();
   return s.map((_,i)=>s[(i+best.shift)%N]);
 }
 // affine [a,b,c,d,e,f] mapping src triangle -> dst triangle
@@ -2059,7 +2067,7 @@ function warpToCurrentTile(creatureImg){
   const out=buildOutline();
   const Tunit=out.map(p=>({x:(p.x-texFrame.x)/texFrame.w, y:(p.y-texFrame.y)/texFrame.h}));
   const T=resampleClosed(Tunit, N).map(p=>({x:p.x*RES, y:p.y*RES}));
-  const S=bestAlign(S0, T);                                   // align creature loop to the tile loop
+  const S=bestAlign(S0, T, true);                             // align + ROTATE the image to the tile's orientation
   const cS=centroidOf(S), cT=centroidOf(T);
   const cv2=document.createElement('canvas'); cv2.width=cv2.height=RES;
   const g=cv2.getContext('2d'); g.clearRect(0,0,RES,RES); g.imageSmoothingQuality='high';
@@ -2379,7 +2387,7 @@ async function comfyIPAdapterFit(baseURL, maskWhiteURL, refURL, subject, model, 
     "ipm":{class_type:"IPAdapterModelLoader",inputs:{ipadapter_file:"ip-adapter-plus_sdxl_vit-h.safetensors"}},
     "cv":{class_type:"CLIPVisionLoader",inputs:{clip_name:"CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"}},
     "ref":{class_type:"LoadImage",inputs:{image:refName}},
-    "ipa":{class_type:"IPAdapterAdvanced",inputs:{model:["4",0],ipadapter:["ipm",0],image:["ref",0],clip_vision:["cv",0],weight:0.85,weight_type:"style and composition",combine_embeds:"concat",start_at:0.0,end_at:1.0,embeds_scaling:"V only"}},
+    "ipa":{class_type:"IPAdapterAdvanced",inputs:{model:["4",0],ipadapter:["ipm",0],image:["ref",0],clip_vision:["cv",0],weight:0.7,weight_type:"linear",combine_embeds:"concat",start_at:0.0,end_at:1.0,embeds_scaling:"V only"}},
     "6":{class_type:"CLIPTextEncode",inputs:{text:pos,clip:["4",1]}},
     "7":{class_type:"CLIPTextEncode",inputs:{text:neg,clip:["4",1]}},
     "10":{class_type:"LoadImage",inputs:{image:baseName}},
@@ -2567,11 +2575,11 @@ async function wizFitImageLocal(){
         if(hasIPA){
           const useModel=await pickBackendCheckpoint(model);
           status.textContent='🎯 '+useModel.replace(/\.(safetensors|ckpt|sft)$/,'').slice(0,20)+' + IP-Adapter is fitting your image (using it as a reference)… (20–50s)';
-          resURL=await comfyIPAdapterFit(warpedW, mkURL, aiRefURL, name, useModel, 0.8, prompt);
+          resURL=await comfyIPAdapterFit(warpedW, mkURL, aiRefURL, name, useModel, 0.9, prompt);
           fitEngine='IP-Adapter reference';
         }else{
           status.textContent='🎨 '+model.replace(/\.(safetensors|ckpt|sft)$/,'').slice(0,22)+' is artistically fitting your image into the tile… (20–50s)';
-          resURL=await comfyFitToMask(warpedW, mkURL, name, model, 0.6, prompt);
+          resURL=await comfyFitToMask(warpedW, mkURL, name, model, 0.8, prompt);
           fitEngine='local redraw';
         }
         progStop(); artistic=true;
@@ -3248,7 +3256,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 52 (2026-07-02)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 53 (2026-07-03)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
