@@ -264,6 +264,7 @@
       </select></div>
     <button class="act" id="btnFill" title="Grow the figure into any leftover white space (works after loading a saved design too)">🩹 Fill white space</button>
     <button class="act" id="btnShape" title="Download the tile outline as a transparent PNG to hand to ChatGPT">⬇ Tile shape PNG</button>
+    <button class="act" id="btnTilePng" title="Download JUST this one tile, filled with its current design, on a transparent background">⬇ Filled tile PNG</button>
     <button class="act" id="btnSave">Save design</button>
     <button class="act" id="btnLoad">Load design</button>
   </div>
@@ -1421,6 +1422,11 @@ document.getElementById('btnShape').addEventListener('click',()=>{
   const a=document.createElement('a');
   a.download='tile-shape.png'; a.href=buildShapePNG(); a.click();
 });
+document.getElementById('btnTilePng').addEventListener('click',()=>{
+  // JUST this one tile, as currently drawn & filled, on a transparent background
+  const a=document.createElement('a');
+  a.download='tile-filled.png'; a.href=buildFilledTilePNG(); a.click();
+});
 document.getElementById('curveMain').addEventListener('input',e=>{
   curvature=parseFloat(e.target.value);
   const gc=document.getElementById('genCurve'); if(gc) gc.value=curvature;
@@ -1894,6 +1900,28 @@ function buildCellPNG(){
   c.beginPath(); c.moveTo(o[0].x,o[0].y); for(let i=1;i<o.length;i++)c.lineTo(o[i].x,o[i].y); c.closePath();
   c.lineWidth=RES*0.006; c.strokeStyle='#444'; c.stroke();
   texFrame=frame;
+  return off.toDataURL('image/png');
+}
+// JUST the one tile, as currently drawn & filled, on a TRANSPARENT background (honours texZoom / nudge).
+// Mirrors draw()'s per-tile fill so the exported cell matches the screen exactly.
+function buildFilledTilePNG(){
+  const RES=TEX_RES, outline=buildOutline();
+  const frame = (useTexture && texImage && texFrame) ? texFrame : computeTexFrame(outline);
+  const off=document.createElement('canvas'); off.width=off.height=RES;
+  const c=off.getContext('2d');
+  const sx=RES/frame.w, sy=RES/frame.h;
+  const w2c=p=>({x:(p.x-frame.x)*sx, y:(p.y-frame.y)*sy});
+  c.save();
+  const o=outline.map(w2c); c.beginPath(); c.moveTo(o[0].x,o[0].y);
+  for(let i=1;i<o.length;i++) c.lineTo(o[i].x,o[i].y); c.closePath(); c.clip();   // transparent outside the tile
+  if(useTexture && texImage){
+    const fc={x:frame.x+frame.w/2, y:frame.y+frame.h/2}, sz=frame.w*texZoom;
+    const fx=fc.x-sz/2 + texOffX*frame.w, fy=fc.y-sz/2 + texOffY*frame.h;   // same placement as draw()
+    c.setTransform(sz*sx,0,0,sz*sy,(fx-frame.x)*sx,(fy-frame.y)*sy);
+    c.drawImage(texProcessed||texImage,0,0,1,1);
+    c.setTransform(1,0,0,1,0,0);
+  } else { c.fillStyle=val('colA'); c.fillRect(0,0,RES,RES); }               // no image → the solid Fill A colour
+  c.restore();
   return off.toDataURL('image/png');
 }
 function defaultPrompt(subject){
@@ -3282,7 +3310,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 55 (2026-07-06)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 56 (2026-07-06)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
