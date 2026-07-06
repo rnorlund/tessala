@@ -1449,12 +1449,38 @@ document.getElementById('btnLoad').addEventListener('click',()=>{
     r.onload=()=>{ try{loadState(JSON.parse(r.result));}catch(err){alert('Bad file');} }; r.readAsText(f);};
   inp.click();
 });
-// drag a saved .json design anywhere onto the window to reopen it
+// transient toast for drag-and-drop feedback
+function dropToast(msg, ok){ let t=document.getElementById('dropToast');
+  if(!t){ t=document.createElement('div'); t.id='dropToast';
+    t.style.cssText='position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:9999;padding:10px 16px;border-radius:10px;font:600 13px system-ui,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.5);transition:opacity .3s;pointer-events:none';
+    document.body.appendChild(t); }
+  t.style.background=ok===false?'#5a1f24':'#1c3a2a'; t.style.color=ok===false?'#ffd4d4':'#c8f5da';
+  t.style.border='1px solid '+(ok===false?'#8a3a42':'#2e6e4a'); t.textContent=msg; t.style.opacity='1';
+  clearTimeout(dropToast._t); dropToast._t=setTimeout(()=>{ t.style.opacity='0'; }, 2600); }
+// Drag a saved .json design (reopens it) OR a filled-tile IMAGE (becomes the current tile) anywhere onto the window.
 window.addEventListener('dragover',e=>{ if(e.dataTransfer&&Array.from(e.dataTransfer.items||[]).some(it=>it.kind==='file')) e.preventDefault(); });
 window.addEventListener('drop',e=>{
   const f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]; if(!f) return;
   if(/\.json$/i.test(f.name) || f.type==='application/json'){ e.preventDefault();
-    const r=new FileReader(); r.onload=()=>{ try{ loadState(JSON.parse(r.result)); }catch(err){ alert('Could not open that file — not a Tessala .json design.'); } }; r.readAsText(f); }
+    const r=new FileReader(); r.onload=()=>{ try{ loadState(JSON.parse(r.result)); dropToast('✓ Opened design'); }catch(err){ alert('Could not open that file — not a Tessala .json design.'); } }; r.readAsText(f); }
+  else if(/\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name) || /^image\//.test(f.type)){ e.preventDefault();
+    // Drop a FILLED tile image → make it THIS project's tile, fitted to the current shape (perfect fit if it was
+    // painted over this tile's exported shape PNG). texFrame = the current tile's square frame; zoom/offset reset.
+    pushUndo();
+    const r=new FileReader(); r.onload=()=>{
+      loadTexFromURL(r.result, ()=>{
+        useTexture=true; const au=document.getElementById('aiUse'); if(au) au.checked=true;
+        const sm=document.getElementById('stampMode'); if(sm) sm.checked=false;
+        texZoom=1; texOffX=0; texOffY=0;
+        const z=document.getElementById('aiZoom'); if(z) z.value=1;
+        const ox=document.getElementById('aiOffX'); if(ox) ox.value=0;
+        const oy=document.getElementById('aiOffY'); if(oy) oy.value=0;
+        texFrame=computeTexFrame(buildOutline());        // fit the image to the CURRENT on-screen tile
+        buildProcessedTex(); draw();
+        dropToast('✓ Set as the tile — fills the current shape. ⌘Z / Ctrl+Z to undo.');
+      });
+    }; r.readAsDataURL(f);
+  }
 });
 function loadState(s){
   setPattern(s.type);
@@ -3256,7 +3282,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 54 (2026-07-05)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 55 (2026-07-06)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
