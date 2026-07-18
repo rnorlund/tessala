@@ -240,6 +240,17 @@
       <button id="figClearB" style="display:none;padding:4px 9px;border-radius:6px;border:1px solid #2a3348;background:#0c0f16;color:var(--muted);font-size:11px;cursor:pointer" title="Remove the 2nd figure">✕ remove B</button>
     </div>
     <div class="hint" style="font-size:10px;margin-top:2px"><b>Angel-&amp;-Devil style:</b> one tile shape, two fillings. Set your main image, then load (or <b>Shift-drop</b>) a 2nd image — it fills the alternate (rotated/reflected) cells.</div>
+    <label class="chk" style="margin-top:10px"><input type="checkbox" id="splitOn"> ✂ Split tile into two <b>different shapes</b></label>
+    <div id="splitCtl" style="display:none">
+      <div class="row"><label>cut from</label><input type="range" id="cutA" min="0" max="1" step="0.01" value="0"></div>
+      <div class="row"><label>cut to</label><input type="range" id="cutB" min="0" max="1" step="0.01" value="0.5"></div>
+      <div class="row"><label>cut bend</label><input type="range" id="cutBend" min="-0.6" max="0.6" step="0.02" value="0"></div>
+      <div class="row" style="gap:6px;margin-top:2px">
+        <button id="expP1" style="padding:4px 9px;border-radius:6px;border:1px solid #2a3348;background:#0c0f16;color:var(--ink);font-size:11px;cursor:pointer" title="Download shape A (gold) as a transparent PNG to fill">⬇ shape A</button>
+        <button id="expP2" style="padding:4px 9px;border-radius:6px;border:1px solid #2a3348;background:#0c0f16;color:var(--ink);font-size:11px;cursor:pointer" title="Download shape B (purple) as a transparent PNG to fill">⬇ shape B</button>
+      </div>
+      <div class="hint" style="font-size:10px;margin-top:2px">Two <b>different shapes</b> tile together (A = <span style="color:#e3b23c">gold</span>, B = <span style="color:#9b7de0">purple</span>). Export each shape, fill it, then load as your <b>image</b> (→ A) and <b>2nd figure</b> (→ B).</div>
+    </div>
     <div class="row"><label>Outline width</label><input type="range" id="outW" min="0" max="6" step="0.5" value="1.5"></div>
     <div class="row"><label>Pen width</label><input type="range" id="penW" min="1" max="12" step="0.5" value="3"></div>
   </div>
@@ -709,6 +720,8 @@ let texImage=null, texFrame=null, useTexture=false;  // AI-generated fill image
 let texZoom=1, texOffX=0, texOffY=0;                  // fit the image into the tile
 let texProcessed=null;                                // image with light areas blended to gap colour
 let texImageB=null, texImageBURL=null, texProcessedB=null;   // 2nd figure for the alternate cells (angel/devil style)
+// ── SPLIT TILE: cut the fundamental tile into two differently-shaped sub-tiles (2-motif different SHAPES) ──
+let splitOn=false, splitCut={ta:0.0, tb:0.5, bend:0.0};      // cut endpoints (fraction of outline) + perpendicular bend
 const gapColorVal=()=>document.getElementById('gapColor').value;
 function hexToRgb(h){const n=parseInt(h.slice(1),16);return{r:(n>>16)&255,g:(n>>8)&255,b:n&255};}
 // recolour near-white pixels of one image to the gap colour (returns a canvas, or null if blending is off/failed)
@@ -1005,6 +1018,7 @@ function draw(){
   const baseCen=centroid(outline);
   const S=screenMat(W,H);
   const insts=instances(W,H);
+  const subP = splitOn ? buildSubOutlines() : null;   // two sub-tiles when split mode is on
   const colA=val('colA'), colB=val('colB'), colOut=val('colOutline'), colPen=val('colPen');
   const twoTone=document.getElementById('twoTone').checked;
   const outW=parseFloat(val('outW')), penW=parseFloat(val('penW'));
@@ -1047,6 +1061,15 @@ function draw(){
     } else { fill = reflected? colB : colA; cellB = reflected; }
 
     ctx.globalAlpha = (dimOthers && !isBase) ? 0.18 : 1;
+
+    if(subP){
+      // SPLIT: two differently-shaped sub-tiles in one cell — P1 → figure A / colA, P2 → figure B / colB.
+      if(useTexture && (texImage||texImageB)){ ctx.fillStyle=gapColorVal(); pathPoly(ctx,scr); ctx.fill(); }   // gap backdrop
+      const imgA=(useTexture&&texImage)?(texProcessed||texImage):null;
+      const imgB=(useTexture&&texImageB)?(texProcessedB||texImageB):((useTexture&&texImage)?(texProcessed||texImage):null);
+      drawSubRegion(full, subP.P1, imgA, colA, subP.frameP1);
+      drawSubRegion(full, subP.P2, imgB, colB, subP.frameP2);
+    } else {
     // backdrop: gap/water colour behind an image fill, else the tile fill colour
     ctx.fillStyle = (texImage && useTexture) ? gapColorVal() : fill;
     pathPoly(ctx,scr); ctx.fill();
@@ -1066,6 +1089,7 @@ function draw(){
       ctx.drawImage(timg,0,0,1,1);
       ctx.setTransform(d,0,0,d,0,0);                      // back to base transform
       ctx.restore();
+    }
     }
 
     // decorations clipped to this tile
@@ -1087,6 +1111,15 @@ function draw(){
     if(outW>0){ ctx.strokeStyle=colOut; ctx.lineWidth=outW; ctx.lineJoin='round';
       pathPoly(ctx,scr); ctx.stroke(); }
     ctx.globalAlpha=1;
+  }
+
+  // split-cut overlay: show the cut + its endpoints on the base tile so you can see/position it
+  if(subP){
+    const cutScr=subP.cut.map(p=>M.apply(S,p));
+    ctx.save(); ctx.strokeStyle='#00e0c0'; ctx.lineWidth=2; ctx.setLineDash([7,5]);
+    ctx.beginPath(); cutScr.forEach((q,i)=>i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y)); ctx.stroke(); ctx.setLineDash([]);
+    [subP.A,subP.B].forEach(pt=>{ const q=M.apply(S,pt); ctx.beginPath(); ctx.arc(q.x,q.y,6,0,7); ctx.fillStyle='#00e0c0'; ctx.fill(); ctx.strokeStyle='#04322d'; ctx.lineWidth=2; ctx.stroke(); });
+    ctx.restore();
   }
 
   // trace overlay: show the imported image faintly behind the editable tile,
@@ -1449,6 +1482,7 @@ function snapshot(includeImage){
     lastGenSource, lastGenModel, lastGenSubject,        // so 🩹 Fill works after reload
     engine, advTypeIndex, advParams:advParams?advParams.slice():null,
     advEdges:advEdges?advEdges.map(a=>a?a.map(p=>({x:p.x,y:p.y})):[]):[],
+    splitOn, splitCut:{ta:splitCut.ta, tb:splitCut.tb, bend:splitCut.bend},
     colors:{A:val('colA'),B:val('colB'),out:val('colOutline'),pen:val('colPen')}};
   if(includeImage && texImageURL) o.texImageURL=texImageURL;
   if(includeImage && texImageBURL) o.texImageBURL=texImageBURL;
@@ -1532,6 +1566,8 @@ function loadState(s){
   lastGenModel=s.lastGenModel||''; lastGenSubject=s.lastGenSubject||'';
   texImage = null; texImageURL = null; texProcessed = null;
   texImageB = null; texImageBURL = null; texProcessedB = null;
+  splitOn = !!s.splitOn; splitCut = s.splitCut ? {ta:s.splitCut.ta, tb:s.splitCut.tb, bend:s.splitCut.bend} : {ta:0,tb:0.5,bend:0};
+  if(typeof window._syncSplitUI==='function') window._syncSplitUI();
   if(s.texImageURL){ loadTexFromURL(s.texImageURL, ()=>{ buildProcessedTex(); draw(); }); }
   if(s.texImageBURL){ loadTexBFromURL(s.texImageBURL, ()=>{ buildProcessedTex(); draw(); }); }
   // engine state (advanced tactile tiles)
@@ -1888,6 +1924,44 @@ function computeTexFrame(outline){
   const w=xe-xs, h=ye-ys, size=Math.max(w,h)*1.12;          // square + 6% margin each side
   const cx=(xs+xe)/2, cy=(ys+ye)/2;
   return {x:cx-size/2, y:cy-size/2, w:size, h:size};
+}
+// Split the current tile outline into two sub-polygons along the cut (endpoints ta,tb on the boundary + bend).
+// Both share the exact cut curve (one uses it reversed) so deforming the cut dents one where it bumps the other.
+function buildSubOutlines(){
+  const O=buildOutline(), N=O.length;
+  let iA=(((Math.round(splitCut.ta*N))%N)+N)%N, iB=(((Math.round(splitCut.tb*N))%N)+N)%N;
+  if(iA===iB) iB=(iA+Math.floor(N/2))%N;
+  const A=O[iA], B=O[iB];
+  const dx=B.x-A.x, dy=B.y-A.y, len=Math.hypot(dx,dy)||1, px=-dy/len, py=dx/len;   // perpendicular unit
+  const mx=(A.x+B.x)/2 + px*splitCut.bend*len, my=(A.y+B.y)/2 + py*splitCut.bend*len;
+  const K=28, cut=[];
+  for(let k=0;k<=K;k++){ const t=k/K, u=1-t; cut.push({x:u*u*A.x+2*u*t*mx+t*t*B.x, y:u*u*A.y+2*u*t*my+t*t*B.y}); }  // quadratic A→mid→B
+  const arc=(i,j)=>{ const r=[]; let k=i; while(true){ r.push(O[k]); if(k===j) break; k=(k+1)%N; } return r; };
+  const P1 = arc(iA,iB).concat(cut.slice(1,K).reverse());   // boundary A..B, then cut B..A
+  const P2 = arc(iB,iA).concat(cut.slice(1,K));             // boundary B..A, then cut A..B
+  return {P1, P2, A, B, cut, frameP1:computeTexFrame(P1), frameP2:computeTexFrame(P2)};
+}
+// draw one sub-region of a tile instance: the image mapped to its own sub-frame, else a flat colour
+function drawSubRegion(full, poly, img, color, frame){
+  const scr=poly.map(p=>M.apply(full,p));
+  ctx.save(); pathPoly(ctx,scr); ctx.clip();
+  if(img && frame){
+    const sz=frame.w, fx=frame.x, fy=frame.y;                // sub-image fills its own square frame (zoom 1)
+    const m=M.mul(full,[sz,0,0,sz,fx,fy]), d=DPR;
+    ctx.setTransform(d*m[0],d*m[1],d*m[2],d*m[3],d*m[4],d*m[5]);
+    ctx.drawImage(img,0,0,1,1); ctx.setTransform(d,0,0,d,0,0);
+  } else { pathPoly(ctx,scr); ctx.fillStyle=color; ctx.fill(); }
+  ctx.restore();
+}
+// export one sub-tile's shape as a white-on-transparent PNG (at its own frame) — fill it, load as figure A/B
+function buildSubShapePNG(which){
+  const s=buildSubOutlines(), poly=(which==='B')?s.P2:s.P1, frame=(which==='B')?s.frameP2:s.frameP1, RES=TEX_RES;
+  const off=document.createElement('canvas'); off.width=off.height=RES; const c=off.getContext('2d');
+  const map=p=>({x:(p.x-frame.x)/frame.w*RES, y:(p.y-frame.y)/frame.h*RES});
+  const o=poly.map(map); c.beginPath(); c.moveTo(o[0].x,o[0].y);
+  for(let i=1;i<o.length;i++) c.lineTo(o[i].x,o[i].y); c.closePath();
+  c.fillStyle='#ffffff'; c.fill(); c.lineWidth=RES*0.006; c.strokeStyle='#555555'; c.lineJoin='round'; c.stroke();
+  return off.toDataURL('image/png');
 }
 function paintShape(c, frame, res, opts){
   const outline=buildOutline();
@@ -3191,6 +3265,20 @@ document.getElementById('gapColor').addEventListener('input',()=>{ buildProcesse
 document.getElementById('blendWhite').addEventListener('change',()=>{ buildProcessedTex(); draw(); });
 document.getElementById('blendAmt').addEventListener('input',()=>{ buildProcessedTex(); draw(); });
 document.getElementById('stampMode').addEventListener('change',draw);
+// ── split-tile controls ──
+(function(){
+  const cb=document.getElementById('splitOn'), ctl=document.getElementById('splitCtl');
+  const syncUI=()=>{ if(cb) cb.checked=splitOn; if(ctl) ctl.style.display=splitOn?'':'none';
+    const a=document.getElementById('cutA'), b=document.getElementById('cutB'), bn=document.getElementById('cutBend');
+    if(a) a.value=splitCut.ta; if(b) b.value=splitCut.tb; if(bn) bn.value=splitCut.bend; };
+  window._syncSplitUI=syncUI;
+  if(cb) cb.addEventListener('change',()=>{ pushUndo(); splitOn=cb.checked; if(ctl) ctl.style.display=splitOn?'':'none'; draw(); });
+  const upd=()=>{ splitCut={ta:parseFloat(document.getElementById('cutA').value), tb:parseFloat(document.getElementById('cutB').value), bend:parseFloat(document.getElementById('cutBend').value)}; draw(); };
+  ['cutA','cutB','cutBend'].forEach(id=>{ const el=document.getElementById(id); if(el) el.addEventListener('input',upd); });
+  const dl=(url,name)=>{ const a=document.createElement('a'); a.download=name; a.href=url; a.click(); };
+  const e1=document.getElementById('expP1'); if(e1) e1.addEventListener('click',()=>dl(buildSubShapePNG('A'),'shape-A.png'));
+  const e2=document.getElementById('expP2'); if(e2) e2.addEventListener('click',()=>dl(buildSubShapePNG('B'),'shape-B.png'));
+})();
 document.getElementById('aiCell').addEventListener('click',()=>{
   const a=document.createElement('a'); a.download='tile-cell-to-fill.png'; a.href=buildCellPNG(); a.click();
 });
@@ -3349,7 +3437,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 57 (2026-07-18)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 58 (2026-07-18)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
