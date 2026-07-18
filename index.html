@@ -261,7 +261,7 @@
         <div class="sw"><input type="color" id="transSky" value="#c3d6ea"><span>Sky</span></div>
         <div class="sw"><input type="color" id="transWater" value="#1d3b5e"><span>Water</span></div>
       </div>
-      <div class="hint" style="font-size:10px;margin-top:2px">Figure A (main image) rules the top, figure B (2nd figure) the bottom — they crossfade + grow across the band, over the Sky→Water gradient. Load two figures (or a split) for the full effect.</div>
+      <div class="hint" style="font-size:10px;margin-top:2px"><b>For a real shape change, turn on ✂ Split first</b> — then shape A (figure) rules the top and dissolves into the sky, while the <b>different</b> shape B emerges from the water below (figure-ground swap, clean interlock). Without split it's a single motif dissolving into the background.</div>
     </div>
     <div class="row"><label>Outline width</label><input type="range" id="outW" min="0" max="6" step="0.5" value="1.5"></div>
     <div class="row"><label>Pen width</label><input type="range" id="penW" min="1" max="12" step="0.5" value="3"></div>
@@ -1084,19 +1084,24 @@ function draw(){
     ctx.globalAlpha = (dimOthers && !isBase) ? 0.18 : 1;
 
     if(transOn){
-      // TRANSMUTATION: crossfade figure A → figure B along the axis, over the gradient; optional growth.
+      // TRANSMUTATION along the axis. t: 0 = sky end, 1 = water end.
       let cx=0,cy=0; for(const q of scr){ cx+=q.x; cy+=q.y; } cx/=scr.length; cy/=scr.length;
       const t = transDir==='horiz' ? cx/W : transDir==='diag' ? (cx/W+cy/H)/2 : cy/H;
       const half=Math.max(0.02, transBand/2);
-      const aA = Math.max(0,Math.min(1, ((transCenter+half)-t)/(2*half)));   // A: full at top, fades through band
-      const aB = texImageB ? Math.max(0,Math.min(1, (t-(transCenter-half))/(2*half))) : 0;   // B: fades in
       const dim=(dimOthers&&!isBase);
-      if(useTexture && texImage){
-        drawTransFig(full, scr, texProcessed||texImage, aA, transGrowth?(0.35+0.65*aA):1, dim);
-        if(texImageB) drawTransFig(full, scr, texProcessedB||texImageB, aB, transGrowth?(0.35+0.65*aB):1, dim);
+      const imgA=(useTexture&&texImage)?(texProcessed||texImage):null;
+      const imgB=(useTexture&&texImageB)?(texProcessedB||texImageB):imgA;
+      if(subP){
+        // REAL Sky-&-Water: two DIFFERENT shapes (P1,P2) with a figure-ground swap. Disjoint regions → clean, no mush.
+        const aP1 = Math.max(0,Math.min(1, ((transCenter+half)-t)/(2*half)));   // shape A: figure at top → dissolves down
+        const aP2 = Math.max(0,Math.min(1, (t-(transCenter-half))/(2*half)));   // shape B: emerges from water going down
+        drawTransRegion(full, subP.P1, imgA, colA, subP.frameP1, aP1, transGrowth, dim);
+        drawTransRegion(full, subP.P2, imgB, colB, subP.frameP2, aP2, transGrowth, dim);
       } else {
-        // no image: crossfade the two fill colours as flat shapes
-        ctx.save(); ctx.globalAlpha=(dim?0.3:1); ctx.fillStyle= aB>aA?colB:colA; pathPoly(ctx,scr); ctx.fill(); ctx.globalAlpha=1; ctx.restore();
+        // no split: a single figure dissolving into the background (still a valid one-motif sky/water)
+        const aA = Math.max(0,Math.min(1, ((transCenter+half)-t)/(2*half)));
+        if(imgA) drawTransFig(full, scr, imgA, aA, transGrowth?(0.4+0.6*aA):1, dim);
+        else { ctx.save(); ctx.globalAlpha=aA*(dim?0.3:1); ctx.fillStyle=colA; pathPoly(ctx,scr); ctx.fill(); ctx.globalAlpha=1; ctx.restore(); }
       }
     } else if(subP){
       // SPLIT: two differently-shaped sub-tiles in one cell — P1 → figure A / colA, P2 → figure B / colB.
@@ -1994,6 +1999,19 @@ function drawSubRegion(full, poly, img, color, frame){
     ctx.drawImage(img,0,0,1,1); ctx.setTransform(d,0,0,d,0,0);
   } else { pathPoly(ctx,scr); ctx.fillStyle=color; ctx.fill(); }
   ctx.restore();
+}
+// figure-ground transmutation of ONE sub-region (a split shape): the figure fades over the gradient background
+// as alpha→0 (dissolves into sky/water), and grows in as alpha→1. Regions are DISJOINT so there's no muddy overlap.
+function drawTransRegion(full, poly, img, color, frame, alpha, growth, dim){
+  if(alpha<=0.01) return;
+  const scr=poly.map(p=>M.apply(full,p));
+  ctx.save(); pathPoly(ctx,scr); ctx.clip(); ctx.globalAlpha = dim?alpha*0.3:alpha;
+  if(img && frame){
+    const s=growth?(0.4+0.6*alpha):1, sz=frame.w*s, fx=frame.x+frame.w/2-sz/2, fy=frame.y+frame.h/2-sz/2;
+    const m=M.mul(full,[sz,0,0,sz,fx,fy]), d=DPR;
+    ctx.setTransform(d*m[0],d*m[1],d*m[2],d*m[3],d*m[4],d*m[5]); ctx.drawImage(img,0,0,1,1); ctx.setTransform(d,0,0,d,0,0);
+  } else { pathPoly(ctx,scr); ctx.fillStyle=color; ctx.fill(); }
+  ctx.globalAlpha=1; ctx.restore();
 }
 // draw one figure into a cell for transmutation: alpha (crossfade) + scaleF about the frame centre (growth)
 function drawTransFig(full, scr, img, alpha, scaleF, dim){
@@ -3503,7 +3521,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 59 (2026-07-18)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 60 (2026-07-18)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
