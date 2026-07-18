@@ -251,6 +251,18 @@
       </div>
       <div class="hint" style="font-size:10px;margin-top:2px">Two <b>different shapes</b> tile together (A = <span style="color:#e3b23c">gold</span>, B = <span style="color:#9b7de0">purple</span>). Export each shape, fill it, then load as your <b>image</b> (→ A) and <b>2nd figure</b> (→ B).</div>
     </div>
+    <label class="chk" style="margin-top:10px"><input type="checkbox" id="transOn"> 🌅 Transmutation (Sky &amp; Water)</label>
+    <div id="transCtl" style="display:none">
+      <div class="row"><label>direction</label><select id="transDir" class="tbsel"><option value="vert">vertical</option><option value="horiz">horizontal</option><option value="diag">diagonal</option></select></div>
+      <div class="row"><label>morph at</label><input type="range" id="transCenter" min="0.1" max="0.9" step="0.02" value="0.5"></div>
+      <div class="row"><label>morph width</label><input type="range" id="transBand" min="0.1" max="1" step="0.02" value="0.45"></div>
+      <label class="chk"><input type="checkbox" id="transGrowth" checked> figures grow in / shrink out</label>
+      <div class="swatches" style="margin-top:4px">
+        <div class="sw"><input type="color" id="transSky" value="#c3d6ea"><span>Sky</span></div>
+        <div class="sw"><input type="color" id="transWater" value="#1d3b5e"><span>Water</span></div>
+      </div>
+      <div class="hint" style="font-size:10px;margin-top:2px">Figure A (main image) rules the top, figure B (2nd figure) the bottom — they crossfade + grow across the band, over the Sky→Water gradient. Load two figures (or a split) for the full effect.</div>
+    </div>
     <div class="row"><label>Outline width</label><input type="range" id="outW" min="0" max="6" step="0.5" value="1.5"></div>
     <div class="row"><label>Pen width</label><input type="range" id="penW" min="1" max="12" step="0.5" value="3"></div>
   </div>
@@ -722,6 +734,8 @@ let texProcessed=null;                                // image with light areas 
 let texImageB=null, texImageBURL=null, texProcessedB=null;   // 2nd figure for the alternate cells (angel/devil style)
 // ── SPLIT TILE: cut the fundamental tile into two differently-shaped sub-tiles (2-motif different SHAPES) ──
 let splitOn=false, splitCut={ta:0.0, tb:0.5, bend:0.0};      // cut endpoints (fraction of outline) + perpendicular bend
+// ── TRANSMUTATION (Sky-&-Water): figure A morphs into figure B across an axis, over a two-colour gradient ──
+let transOn=false, transDir='vert', transCenter=0.5, transBand=0.45, transGrowth=true, transSky='#c3d6ea', transWater='#1d3b5e';
 const gapColorVal=()=>document.getElementById('gapColor').value;
 function hexToRgb(h){const n=parseInt(h.slice(1),16);return{r:(n>>16)&255,g:(n>>8)&255,b:n&255};}
 // recolour near-white pixels of one image to the gap colour (returns a canvas, or null if blending is off/failed)
@@ -1019,6 +1033,13 @@ function draw(){
   const S=screenMat(W,H);
   const insts=instances(W,H);
   const subP = splitOn ? buildSubOutlines() : null;   // two sub-tiles when split mode is on
+  if(transOn){                                        // Sky-&-Water: two-colour gradient behind the figures
+    const g = transDir==='horiz' ? ctx.createLinearGradient(0,0,W,0)
+            : transDir==='diag'  ? ctx.createLinearGradient(0,0,W,H)
+            :                      ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,transSky); g.addColorStop(1,transWater);
+    ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  }
   const colA=val('colA'), colB=val('colB'), colOut=val('colOutline'), colPen=val('colPen');
   const twoTone=document.getElementById('twoTone').checked;
   const outW=parseFloat(val('outW')), penW=parseFloat(val('penW'));
@@ -1062,7 +1083,22 @@ function draw(){
 
     ctx.globalAlpha = (dimOthers && !isBase) ? 0.18 : 1;
 
-    if(subP){
+    if(transOn){
+      // TRANSMUTATION: crossfade figure A → figure B along the axis, over the gradient; optional growth.
+      let cx=0,cy=0; for(const q of scr){ cx+=q.x; cy+=q.y; } cx/=scr.length; cy/=scr.length;
+      const t = transDir==='horiz' ? cx/W : transDir==='diag' ? (cx/W+cy/H)/2 : cy/H;
+      const half=Math.max(0.02, transBand/2);
+      const aA = Math.max(0,Math.min(1, ((transCenter+half)-t)/(2*half)));   // A: full at top, fades through band
+      const aB = texImageB ? Math.max(0,Math.min(1, (t-(transCenter-half))/(2*half))) : 0;   // B: fades in
+      const dim=(dimOthers&&!isBase);
+      if(useTexture && texImage){
+        drawTransFig(full, scr, texProcessed||texImage, aA, transGrowth?(0.35+0.65*aA):1, dim);
+        if(texImageB) drawTransFig(full, scr, texProcessedB||texImageB, aB, transGrowth?(0.35+0.65*aB):1, dim);
+      } else {
+        // no image: crossfade the two fill colours as flat shapes
+        ctx.save(); ctx.globalAlpha=(dim?0.3:1); ctx.fillStyle= aB>aA?colB:colA; pathPoly(ctx,scr); ctx.fill(); ctx.globalAlpha=1; ctx.restore();
+      }
+    } else if(subP){
       // SPLIT: two differently-shaped sub-tiles in one cell — P1 → figure A / colA, P2 → figure B / colB.
       if(useTexture && (texImage||texImageB)){ ctx.fillStyle=gapColorVal(); pathPoly(ctx,scr); ctx.fill(); }   // gap backdrop
       const imgA=(useTexture&&texImage)?(texProcessed||texImage):null;
@@ -1107,8 +1143,8 @@ function draw(){
       }
       ctx.restore();
     }
-    // outline
-    if(outW>0){ ctx.strokeStyle=colOut; ctx.lineWidth=outW; ctx.lineJoin='round';
+    // outline (skipped in transmutation mode for a clean sky/water look)
+    if(outW>0 && !transOn){ ctx.strokeStyle=colOut; ctx.lineWidth=outW; ctx.lineJoin='round';
       pathPoly(ctx,scr); ctx.stroke(); }
     ctx.globalAlpha=1;
   }
@@ -1483,6 +1519,7 @@ function snapshot(includeImage){
     engine, advTypeIndex, advParams:advParams?advParams.slice():null,
     advEdges:advEdges?advEdges.map(a=>a?a.map(p=>({x:p.x,y:p.y})):[]):[],
     splitOn, splitCut:{ta:splitCut.ta, tb:splitCut.tb, bend:splitCut.bend},
+    transOn, transDir, transCenter, transBand, transGrowth, transSky, transWater,
     colors:{A:val('colA'),B:val('colB'),out:val('colOutline'),pen:val('colPen')}};
   if(includeImage && texImageURL) o.texImageURL=texImageURL;
   if(includeImage && texImageBURL) o.texImageBURL=texImageBURL;
@@ -1568,6 +1605,11 @@ function loadState(s){
   texImageB = null; texImageBURL = null; texProcessedB = null;
   splitOn = !!s.splitOn; splitCut = s.splitCut ? {ta:s.splitCut.ta, tb:s.splitCut.tb, bend:s.splitCut.bend} : {ta:0,tb:0.5,bend:0};
   if(typeof window._syncSplitUI==='function') window._syncSplitUI();
+  transOn = !!s.transOn;
+  if('transDir' in s) transDir=s.transDir;
+  if('transCenter' in s) transCenter=s.transCenter; if('transBand' in s) transBand=s.transBand;
+  if('transGrowth' in s) transGrowth=s.transGrowth; if(s.transSky) transSky=s.transSky; if(s.transWater) transWater=s.transWater;
+  if(typeof window._syncTransUI==='function') window._syncTransUI();
   if(s.texImageURL){ loadTexFromURL(s.texImageURL, ()=>{ buildProcessedTex(); draw(); }); }
   if(s.texImageBURL){ loadTexBFromURL(s.texImageBURL, ()=>{ buildProcessedTex(); draw(); }); }
   // engine state (advanced tactile tiles)
@@ -1952,6 +1994,17 @@ function drawSubRegion(full, poly, img, color, frame){
     ctx.drawImage(img,0,0,1,1); ctx.setTransform(d,0,0,d,0,0);
   } else { pathPoly(ctx,scr); ctx.fillStyle=color; ctx.fill(); }
   ctx.restore();
+}
+// draw one figure into a cell for transmutation: alpha (crossfade) + scaleF about the frame centre (growth)
+function drawTransFig(full, scr, img, alpha, scaleF, dim){
+  if(alpha<=0.01 || !img || !texFrame) return;
+  ctx.save(); pathPoly(ctx,scr); ctx.clip();
+  ctx.globalAlpha = dim ? alpha*0.3 : alpha;
+  const sz=texFrame.w*scaleF, fx=texFrame.x+texFrame.w/2-sz/2, fy=texFrame.y+texFrame.h/2-sz/2;
+  const m=M.mul(full,[sz,0,0,sz,fx,fy]), d=DPR;
+  ctx.setTransform(d*m[0],d*m[1],d*m[2],d*m[3],d*m[4],d*m[5]);
+  ctx.drawImage(img,0,0,1,1); ctx.setTransform(d,0,0,d,0,0);
+  ctx.globalAlpha=1; ctx.restore();
 }
 // export one sub-tile's shape as a white-on-transparent PNG (at its own frame) — fill it, load as figure A/B
 function buildSubShapePNG(which){
@@ -3279,6 +3332,19 @@ document.getElementById('stampMode').addEventListener('change',draw);
   const e1=document.getElementById('expP1'); if(e1) e1.addEventListener('click',()=>dl(buildSubShapePNG('A'),'shape-A.png'));
   const e2=document.getElementById('expP2'); if(e2) e2.addEventListener('click',()=>dl(buildSubShapePNG('B'),'shape-B.png'));
 })();
+// ── transmutation (Sky & Water) controls ──
+(function(){
+  const cb=document.getElementById('transOn'), ctl=document.getElementById('transCtl');
+  const syncT=()=>{ if(cb) cb.checked=transOn; if(ctl) ctl.style.display=transOn?'':'none';
+    const set=(id,v)=>{ const e=document.getElementById(id); if(e){ if(e.type==='checkbox') e.checked=v; else e.value=v; } };
+    set('transDir',transDir); set('transCenter',transCenter); set('transBand',transBand); set('transGrowth',transGrowth); set('transSky',transSky); set('transWater',transWater); };
+  window._syncTransUI=syncT;
+  if(cb) cb.addEventListener('change',()=>{ pushUndo(); transOn=cb.checked; if(ctl) ctl.style.display=transOn?'':'none'; draw(); });
+  const upd=()=>{ transDir=document.getElementById('transDir').value; transCenter=parseFloat(document.getElementById('transCenter').value);
+    transBand=parseFloat(document.getElementById('transBand').value); transGrowth=document.getElementById('transGrowth').checked;
+    transSky=document.getElementById('transSky').value; transWater=document.getElementById('transWater').value; draw(); };
+  ['transDir','transCenter','transBand','transGrowth','transSky','transWater'].forEach(id=>{ const e=document.getElementById(id); if(e){ e.addEventListener('input',upd); e.addEventListener('change',upd); } });
+})();
 document.getElementById('aiCell').addEventListener('click',()=>{
   const a=document.createElement('a'); a.download='tile-cell-to-fill.png'; a.href=buildCellPNG(); a.click();
 });
@@ -3437,7 +3503,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 58 (2026-07-18)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 59 (2026-07-18)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
