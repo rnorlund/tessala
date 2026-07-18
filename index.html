@@ -234,7 +234,12 @@
       <div class="sw"><input type="color" id="colOutline" value="#1c1f26"><span>Outline</span></div>
       <div class="sw"><input type="color" id="colPen" value="#1c1f26"><span>Pen</span></div>
     </div>
-    <label class="chk" style="margin-top:10px"><input type="checkbox" id="twoTone" checked> Alternate two fill colors</label>
+    <label class="chk" style="margin-top:10px"><input type="checkbox" id="twoTone" checked> Alternate two fill colors / figures</label>
+    <div class="row" style="margin-top:4px;gap:6px">
+      <button id="figB" style="padding:4px 9px;border-radius:6px;border:1px solid #2a3348;background:#0c0f16;color:var(--ink);font-size:11px;cursor:pointer" title="Load a 2nd figure for the alternate cells — Angel-&-Devil style (same tile shape, two fillings)">＋ 2nd figure (B)…</button>
+      <button id="figClearB" style="display:none;padding:4px 9px;border-radius:6px;border:1px solid #2a3348;background:#0c0f16;color:var(--muted);font-size:11px;cursor:pointer" title="Remove the 2nd figure">✕ remove B</button>
+    </div>
+    <div class="hint" style="font-size:10px;margin-top:2px"><b>Angel-&amp;-Devil style:</b> one tile shape, two fillings. Set your main image, then load (or <b>Shift-drop</b>) a 2nd image — it fills the alternate (rotated/reflected) cells.</div>
     <div class="row"><label>Outline width</label><input type="range" id="outW" min="0" max="6" step="0.5" value="1.5"></div>
     <div class="row"><label>Pen width</label><input type="range" id="penW" min="1" max="12" step="0.5" value="3"></div>
   </div>
@@ -703,24 +708,25 @@ let curvature=1.3;   // fuller, rounder lobes by default (1=full CR, >1 overshoo
 let texImage=null, texFrame=null, useTexture=false;  // AI-generated fill image
 let texZoom=1, texOffX=0, texOffY=0;                  // fit the image into the tile
 let texProcessed=null;                                // image with light areas blended to gap colour
+let texImageB=null, texImageBURL=null, texProcessedB=null;   // 2nd figure for the alternate cells (angel/devil style)
 const gapColorVal=()=>document.getElementById('gapColor').value;
 function hexToRgb(h){const n=parseInt(h.slice(1),16);return{r:(n>>16)&255,g:(n>>8)&255,b:n&255};}
-// rebuild the "blended" image: recolour near-white pixels to the gap colour
-function buildProcessedTex(){
-  texProcessed=null;
-  if(!texImage || !document.getElementById('blendWhite').checked) return;
-  const w=texImage.naturalWidth||1024, h=texImage.naturalHeight||1024;
+// recolour near-white pixels of one image to the gap colour (returns a canvas, or null if blending is off/failed)
+function _blendTex(img){
+  if(!img || !document.getElementById('blendWhite').checked) return null;
+  const w=img.naturalWidth||1024, h=img.naturalHeight||1024;
   const c=document.createElement('canvas'); c.width=w; c.height=h;
-  const x=c.getContext('2d'); x.drawImage(texImage,0,0,w,h);
-  let img; try{ img=x.getImageData(0,0,w,h); }catch(e){ return; }
-  const d=img.data, thr=parseInt(document.getElementById('blendAmt').value,10), bg=hexToRgb(gapColorVal());
+  const x=c.getContext('2d'); x.drawImage(img,0,0,w,h);
+  let id; try{ id=x.getImageData(0,0,w,h); }catch(e){ return null; }
+  const d=id.data, thr=parseInt(document.getElementById('blendAmt').value,10), bg=hexToRgb(gapColorVal());
   for(let i=0;i<d.length;i+=4){
     if(d[i+3]<8) continue;
     const lum=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
     if(lum>thr){ d[i]=bg.r; d[i+1]=bg.g; d[i+2]=bg.b; }
   }
-  x.putImageData(img,0,0); texProcessed=c;
+  x.putImageData(id,0,0); return c;
 }
+function buildProcessedTex(){ texProcessed=_blendTex(texImage); texProcessedB=_blendTex(texImageB); }
 const lerpP=(a,b,t)=>({x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t});
 // CENTRIPETAL Catmull-Rom sample of a point list, INCLUDING both endpoints.
 // Centripetal parameterisation provably avoids cusps/self-overlap within a
@@ -1027,23 +1033,27 @@ function draw(){
       continue;
     }
 
-    // fill
-    let fill;
+    // fill — also decide which cell-GROUP this is (cellB) so figure B can go in the alternate cells
+    let fill, cellB=false;
     if(engine==='advanced' && twoTone){
-      fill = [colA, colB, mixHex(colA,colB)][advColors[idx]||0];   // tactile 3-colouring
+      const ci=advColors[idx]||0;
+      fill = [colA, colB, mixHex(colA,colB)][ci];   // tactile 3-colouring
+      cellB = (ci===1);
     } else if(twoTone){
       const c=M.apply(Ti,baseCen);
       const parity=(Math.round(c.x)+Math.round(c.y)+ (reflected?1:0))&1;
       fill = parity? colB : colA;
-    } else fill = reflected? colB : colA;
+      cellB = !!parity;
+    } else { fill = reflected? colB : colA; cellB = reflected; }
 
     ctx.globalAlpha = (dimOthers && !isBase) ? 0.18 : 1;
     // backdrop: gap/water colour behind an image fill, else the tile fill colour
     ctx.fillStyle = (texImage && useTexture) ? gapColorVal() : fill;
     pathPoly(ctx,scr); ctx.fill();
 
-    // AI image fill, clipped to this tile's exact silhouette
+    // AI image fill, clipped to this tile's exact silhouette. Figure B (if loaded) goes in the alternate cells.
     if(texImage && useTexture && texFrame){
+      const timg = (cellB && texImageB) ? (texProcessedB||texImageB) : (texProcessed||texImage);
       ctx.save();
       pathPoly(ctx,scr); ctx.clip();                     // clip in screen space (under base transform)
       const fc={x:texFrame.x+texFrame.w/2, y:texFrame.y+texFrame.h/2};   // zoom about frame centre
@@ -1053,7 +1063,7 @@ function draw(){
       const m=M.mul(full, localFromImg);                 // image unit-square -> screen
       const d=DPR;
       ctx.setTransform(d*m[0],d*m[1],d*m[2],d*m[3],d*m[4],d*m[5]);
-      ctx.drawImage(texProcessed||texImage,0,0,1,1);
+      ctx.drawImage(timg,0,0,1,1);
       ctx.setTransform(d,0,0,d,0,0);                      // back to base transform
       ctx.restore();
     }
@@ -1441,6 +1451,7 @@ function snapshot(includeImage){
     advEdges:advEdges?advEdges.map(a=>a?a.map(p=>({x:p.x,y:p.y})):[]):[],
     colors:{A:val('colA'),B:val('colB'),out:val('colOutline'),pen:val('colPen')}};
   if(includeImage && texImageURL) o.texImageURL=texImageURL;
+  if(includeImage && texImageBURL) o.texImageBURL=texImageBURL;
   return JSON.stringify(o);
 }
 document.getElementById('btnSave').addEventListener('click',()=>{
@@ -1471,9 +1482,17 @@ window.addEventListener('drop',e=>{
     const r=new FileReader(); r.onload=()=>{ try{ loadState(JSON.parse(r.result)); dropToast('✓ Opened design'); }catch(err){ alert('Could not open that file — not a Tessala .json design.'); } }; r.readAsText(f); }
   else if(/\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name) || /^image\//.test(f.type)){ e.preventDefault();
     // Drop a FILLED tile image → make it THIS project's tile, fitted to the current shape (perfect fit if it was
-    // painted over this tile's exported shape PNG). texFrame = the current tile's square frame; zoom/offset reset.
+    // painted over this tile's exported shape PNG). SHIFT-drop = the 2nd figure (angel/devil style) for alternate cells.
+    const asB = e.shiftKey && !!texImage;
     pushUndo();
     const r=new FileReader(); r.onload=()=>{
+      if(asB){
+        loadTexBFromURL(r.result, ()=>{
+          const tt=document.getElementById('twoTone'); if(tt) tt.checked=true;   // 2 figures need alternating cells
+          buildProcessedTex(); draw();
+          dropToast('✓ Set as figure B — fills the alternate cells (Angel-&-Devil style). ⌘Z to undo.');
+        }); return;
+      }
       loadTexFromURL(r.result, ()=>{
         useTexture=true; const au=document.getElementById('aiUse'); if(au) au.checked=true;
         const sm=document.getElementById('stampMode'); if(sm) sm.checked=false;
@@ -1483,7 +1502,7 @@ window.addEventListener('drop',e=>{
         const oy=document.getElementById('aiOffY'); if(oy) oy.value=0;
         texFrame=computeTexFrame(buildOutline());        // fit the image to the CURRENT on-screen tile
         buildProcessedTex(); draw();
-        dropToast('✓ Set as the tile — fills the current shape. ⌘Z / Ctrl+Z to undo.');
+        dropToast('✓ Set as the tile — fills the current shape. Shift-drop a 2nd image = figure B. ⌘Z to undo.');
       });
     }; r.readAsDataURL(f);
   }
@@ -1512,7 +1531,9 @@ function loadState(s){
   if(s.lastGenSource) lastGenSource=s.lastGenSource;
   lastGenModel=s.lastGenModel||''; lastGenSubject=s.lastGenSubject||'';
   texImage = null; texImageURL = null; texProcessed = null;
+  texImageB = null; texImageBURL = null; texProcessedB = null;
   if(s.texImageURL){ loadTexFromURL(s.texImageURL, ()=>{ buildProcessedTex(); draw(); }); }
+  if(s.texImageBURL){ loadTexBFromURL(s.texImageBURL, ()=>{ buildProcessedTex(); draw(); }); }
   // engine state (advanced tactile tiles)
   if(s.engine==='advanced'){
     engine='advanced';
@@ -3080,6 +3101,9 @@ function loadTexFromURL(url, cb){
   img.onload=()=>{ texImage=img; texImageURL=url; if(!texFrame) texFrame=computeTexFrame(buildOutline()); cb&&cb(); };
   img.src=url;
 }
+function loadTexBFromURL(url, cb){                       // 2nd figure (angel/devil style) — same tile frame as A
+  const img=new Image(); img.onload=()=>{ texImageB=img; texImageBURL=url; cb&&cb(); }; img.src=url;
+}
 let texImageURL=null;
 document.getElementById('btnAI').addEventListener('click',openAI);
 document.getElementById('aiClose').addEventListener('click',closeAI);
@@ -3144,6 +3168,21 @@ document.getElementById('aiImport').addEventListener('click',()=>{
     r.readAsDataURL(f);};
   inp.click();
 });
+(function(){
+  const bBtn=document.getElementById('figB'), clr=document.getElementById('figClearB');
+  const refresh=()=>{ if(clr) clr.style.display = texImageB ? '' : 'none'; };
+  if(bBtn) bBtn.addEventListener('click',()=>{
+    const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
+    inp.onchange=()=>{ const f=inp.files[0]; if(!f) return; pushUndo(); const r=new FileReader();
+      r.onload=()=>loadTexBFromURL(r.result,()=>{
+        const tt=document.getElementById('twoTone'); if(tt) tt.checked=true;
+        buildProcessedTex(); draw(); refresh();
+        dropToast('✓ Figure B set — fills the alternate cells. ⌘Z to undo.');
+      }); r.readAsDataURL(f); };
+    inp.click();
+  });
+  if(clr) clr.addEventListener('click',()=>{ pushUndo(); texImageB=null; texImageBURL=null; texProcessedB=null; draw(); refresh(); });
+})();
 document.getElementById('aiUse').addEventListener('change',e=>{ useTexture=e.target.checked; aiStatusText(); draw(); });
 document.getElementById('aiZoom').addEventListener('input',e=>{ texZoom=parseFloat(e.target.value); draw(); });
 document.getElementById('aiOffX').addEventListener('input',e=>{ texOffX=parseFloat(e.target.value); draw(); });
@@ -3310,7 +3349,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 56 (2026-07-06)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 57 (2026-07-18)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
