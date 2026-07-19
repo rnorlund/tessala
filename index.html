@@ -261,7 +261,7 @@
         <button id="setShapeB" style="padding:4px 9px;border-radius:6px;border:1px solid #2a3348;background:#0c0f16;color:var(--ink);font-size:11px;cursor:pointer" title="Store the CURRENT tile shape as shape B — the outline will morph from your other shape into this one across the band">📌 set shape B = current</button>
         <button id="clearShapeB" style="display:none;padding:4px 9px;border-radius:6px;border:1px solid #2a3348;background:#0c0f16;color:var(--muted);font-size:11px;cursor:pointer" title="Clear shape B (no outline morph)">✕</button>
       </div>
-      <div class="hint" style="font-size:10px">Shape-morph: design tile <b>B</b>, click <b>set shape B</b>, then reshape to <b>A</b> — the outline morphs A→B down the band (paper-style). Leave unset for figure-ground only.</div>
+      <div class="hint" style="font-size:10px"><b>Smooth morph (bird→fish):</b> make figure B (e.g. fit a fish) → <b>📌 set shape B</b> (grabs its shape + image) → make figure A (fit a bird) → turn on 🌅 Transmutation. A warps smoothly into B down the image. Leave B unset for figure-ground/single-motif.</div>
       <div class="swatches" style="margin-top:4px">
         <div class="sw"><input type="color" id="transSky" value="#c3d6ea"><span>Sky</span></div>
         <div class="sw"><input type="color" id="transWater" value="#1d3b5e"><span>Water</span></div>
@@ -1052,6 +1052,25 @@ function draw(){
     try{ const oA=resampleClosed(outlineOf(pat,edgePts),200), oB=resampleClosed(outlineOf(pat,edgePtsB),200);
       morphB={oA, oB, frameB:computeTexFrame(outlineOf(pat,edgePtsB))}; }catch(e){ morphB=null; }
   }
+  // SMOOTH MORPH (paper-style bird→fish): precompute, per band, the two figures warped to the SAME interpolated
+  // outline O(t) and crossfaded → the content genuinely morphs A→B (no mush, since both share the O(t) silhouette).
+  let transBands=null;
+  if(morphB && useTexture && texImage && texImageB){
+    const sig=[texImageURL,texImageBURL,JSON.stringify(edgePts),JSON.stringify(edgePtsB)].join('|');
+    if(_transCache.sig!==sig){
+      const BANDS=13, bands=[], oA=morphB.oA, oB=morphB.oB, fr=texFrame||computeTexFrame(outlineOf(pat,edgePts));
+      const bird=texProcessed||texImage, fish=texProcessedB||texImageB;
+      for(let k=0;k<BANDS;k++){ const lt=k/(BANDS-1);
+        const Ok=oA.map((p,i)=>({x:p.x+(oB[i].x-p.x)*lt, y:p.y+(oB[i].y-p.y)*lt}));
+        const wb=warpImageToOutline(bird, oA, fr, Ok), wf=warpImageToOutline(fish, oB, fr, Ok);
+        const c=document.createElement('canvas'); c.width=c.height=wb.canvas.width; const x=c.getContext('2d');
+        x.globalAlpha=1-lt; x.drawImage(wb.canvas,0,0); x.globalAlpha=lt; x.drawImage(wf.canvas,0,0); x.globalAlpha=1;
+        bands.push({canvas:c, frame:wb.frame, O:Ok});
+      }
+      _transCache={sig, bands};
+    }
+    transBands=_transCache.bands;
+  }
   const colA=val('colA'), colB=val('colB'), colOut=val('colOutline'), colPen=val('colPen');
   const twoTone=document.getElementById('twoTone').checked;
   const outW=parseFloat(val('outW')), penW=parseFloat(val('penW'));
@@ -1105,7 +1124,15 @@ function draw(){
       const imgB=(useTexture&&texImageB)?(texProcessedB||texImageB):imgA;
       const p1 = Math.max(0,Math.min(1, ((transCenter+half)-t)/(2*half)));   // "sky" motif presence: 1 top → 0 bottom
       const p2 = Math.max(0,Math.min(1, (t-(transCenter-half))/(2*half)));   // "water" motif presence: 0 top → 1 bottom
-      if(subP){
+      if(transBands){
+        // SMOOTH bird→fish: pick the precomputed warped+crossfaded band for this position, clip to its morphed outline
+        const k=Math.max(0,Math.min(transBands.length-1, Math.round(p2*(transBands.length-1)))), band=transBands[k];
+        const scrO=band.O.map(p=>M.apply(full,p));
+        ctx.save(); pathPoly(ctx,scrO); ctx.clip(); ctx.globalAlpha=dim?0.4:1;
+        const m=M.mul(full,[band.frame.w,0,0,band.frame.h,band.frame.x,band.frame.y]), d=DPR;
+        ctx.setTransform(d*m[0],d*m[1],d*m[2],d*m[3],d*m[4],d*m[5]); ctx.drawImage(band.canvas,0,0,1,1); ctx.setTransform(d,0,0,d,0,0);
+        ctx.globalAlpha=1; ctx.restore();
+      } else if(subP){
         // REAL Sky-&-Water: two DIFFERENT shapes. Each GROWS from nothing → full across the band (Escher growth),
         // full opacity, the sky/water gradient showing through where a shape has shrunk away. Disjoint → crisp.
         drawTransRegion(full, subP.P1, imgA, colA, subP.frameP1, p1, dim);
@@ -2322,6 +2349,26 @@ function warpToCurrentTile(creatureImg){
   }
   return cv2.toDataURL('image/png');
 }
+// Warp `img` (which fills srcFrame, silhouette ≈ srcOutline) to fill dstOutline. Both outlines are closed loops in
+// tile-local coords with the SAME topology (interpolated from one pattern), so correspondence is index i→i (no
+// bestAlign needed). Returns {canvas, frame} — canvas holds the warped content mapped to frame=computeTexFrame(dst).
+// This is the content-aware morph primitive: warp bird→O(t) and fish→O(t), then crossfade → smooth bird→fish.
+function warpImageToOutline(img, srcOutline, srcFrame, dstOutline){
+  const RES=512, N=srcOutline.length, frame=computeTexFrame(dstOutline);
+  const S=srcOutline.map(p=>({x:(p.x-srcFrame.x)/srcFrame.w*RES, y:(p.y-srcFrame.y)/srcFrame.h*RES}));   // src → image px
+  const T=dstOutline.map(p=>({x:(p.x-frame.x)/frame.w*RES,     y:(p.y-frame.y)/frame.h*RES}));           // dst → output px
+  const cS=centroidOf(S), cT=centroidOf(T);
+  const cv2=document.createElement('canvas'); cv2.width=cv2.height=RES; const g=cv2.getContext('2d');
+  g.clearRect(0,0,RES,RES); g.imageSmoothingQuality='high';
+  const src=document.createElement('canvas'); src.width=src.height=RES; src.getContext('2d').drawImage(img,0,0,RES,RES);
+  for(let i=0;i<N;i++){ const j=(i+1)%N;
+    const m=affineTri([cS,S[i],S[j]],[cT,T[i],T[j]]); if(!m) continue;
+    g.save(); g.beginPath(); g.moveTo(cT.x,cT.y); g.lineTo(T[i].x,T[i].y); g.lineTo(T[j].x,T[j].y); g.closePath(); g.clip();
+    g.setTransform(m[0],m[1],m[2],m[3],m[4],m[5]); g.drawImage(src,0,0); g.setTransform(1,0,0,1,0,0); g.restore();
+  }
+  return {canvas:cv2, frame};
+}
+let _transCache={sig:null, bands:null};   // precomputed per-band warped+crossfaded morph frames (bird→fish)
 // progress bar for the generate→fill pipeline (API has no true progress, so the
 // long "drawing" stage eases toward a ceiling by elapsed time; stages snap it forward)
 let progTimer=null;
@@ -3387,7 +3434,9 @@ document.getElementById('stampMode').addEventListener('change',draw);
   const refreshB=()=>{ if(clrB) clrB.style.display=edgePtsB?'':'none'; };
   window._syncShapeB=refreshB;
   const sb=document.getElementById('setShapeB');
-  if(sb) sb.addEventListener('click',()=>{ if(engine==='advanced'){ dropToast('Shape-morph works in the simple engine',false); return; } pushUndo(); edgePtsB=cloneEp(edgePts); refreshB(); draw(); dropToast('✓ Shape B captured — reshape the tile to A, then it morphs A→B.'); });
+  if(sb) sb.addEventListener('click',()=>{ if(engine==='advanced'){ dropToast('Shape-morph works in the simple engine',false); return; }
+    pushUndo(); edgePtsB=cloneEp(edgePts); if(texImage){ texImageB=texImage; texImageBURL=texImageURL; } buildProcessedTex(); refreshB(); draw();
+    dropToast('✓ Figure B captured (shape + image). Now make figure A, turn on 🌅 Transmutation → it morphs A→B.'); });
   if(clrB) clrB.addEventListener('click',()=>{ pushUndo(); edgePtsB=null; refreshB(); draw(); });
 })();
 document.getElementById('aiCell').addEventListener('click',()=>{
@@ -3548,7 +3597,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 61 (2026-07-19)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 62 (2026-07-19)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
