@@ -257,6 +257,11 @@
       <div class="row"><label>morph at</label><input type="range" id="transCenter" min="0.1" max="0.9" step="0.02" value="0.5"></div>
       <div class="row"><label>morph width</label><input type="range" id="transBand" min="0.1" max="1" step="0.02" value="0.45"></div>
       <label class="chk"><input type="checkbox" id="transGrowth" checked> figures grow in / shrink out</label>
+      <div class="row" style="gap:6px;margin-top:2px">
+        <button id="setShapeB" style="padding:4px 9px;border-radius:6px;border:1px solid #2a3348;background:#0c0f16;color:var(--ink);font-size:11px;cursor:pointer" title="Store the CURRENT tile shape as shape B — the outline will morph from your other shape into this one across the band">📌 set shape B = current</button>
+        <button id="clearShapeB" style="display:none;padding:4px 9px;border-radius:6px;border:1px solid #2a3348;background:#0c0f16;color:var(--muted);font-size:11px;cursor:pointer" title="Clear shape B (no outline morph)">✕</button>
+      </div>
+      <div class="hint" style="font-size:10px">Shape-morph: design tile <b>B</b>, click <b>set shape B</b>, then reshape to <b>A</b> — the outline morphs A→B down the band (paper-style). Leave unset for figure-ground only.</div>
       <div class="swatches" style="margin-top:4px">
         <div class="sw"><input type="color" id="transSky" value="#c3d6ea"><span>Sky</span></div>
         <div class="sw"><input type="color" id="transWater" value="#1d3b5e"><span>Water</span></div>
@@ -736,6 +741,7 @@ let texImageB=null, texImageBURL=null, texProcessedB=null;   // 2nd figure for t
 let splitOn=false, splitCut={ta:0.0, tb:0.5, bend:0.0};      // cut endpoints (fraction of outline) + perpendicular bend
 // ── TRANSMUTATION (Sky-&-Water): figure A morphs into figure B across an axis, over a two-colour gradient ──
 let transOn=false, transDir='vert', transCenter=0.5, transBand=0.45, transGrowth=true, transSky='#c3d6ea', transWater='#1d3b5e';
+let edgePtsB=null;   // a SECOND tile shape (same pattern) — the transmutation morphs the outline A→B across the band
 const gapColorVal=()=>document.getElementById('gapColor').value;
 function hexToRgb(h){const n=parseInt(h.slice(1),16);return{r:(n>>16)&255,g:(n>>8)&255,b:n&255};}
 // recolour near-white pixels of one image to the gap colour (returns a canvas, or null if blending is off/failed)
@@ -1040,6 +1046,12 @@ function draw(){
     g.addColorStop(0,transSky); g.addColorStop(1,transWater);
     ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
   }
+  // shape-morph: interpolate the tile OUTLINE from shape A (edgePts) to shape B (edgePtsB) across the band
+  let morphB=null;
+  if(transOn && edgePtsB && engine!=='advanced'){
+    try{ const oA=resampleClosed(outlineOf(pat,edgePts),200), oB=resampleClosed(outlineOf(pat,edgePtsB),200);
+      morphB={oA, oB, frameB:computeTexFrame(outlineOf(pat,edgePtsB))}; }catch(e){ morphB=null; }
+  }
   const colA=val('colA'), colB=val('colB'), colOut=val('colOutline'), colPen=val('colPen');
   const twoTone=document.getElementById('twoTone').checked;
   const outW=parseFloat(val('outW')), penW=parseFloat(val('penW'));
@@ -1091,17 +1103,21 @@ function draw(){
       const dim=(dimOthers&&!isBase);
       const imgA=(useTexture&&texImage)?(texProcessed||texImage):null;
       const imgB=(useTexture&&texImageB)?(texProcessedB||texImageB):imgA;
+      const p1 = Math.max(0,Math.min(1, ((transCenter+half)-t)/(2*half)));   // "sky" motif presence: 1 top → 0 bottom
+      const p2 = Math.max(0,Math.min(1, (t-(transCenter-half))/(2*half)));   // "water" motif presence: 0 top → 1 bottom
       if(subP){
-        // REAL Sky-&-Water: two DIFFERENT shapes (P1,P2) with a figure-ground swap. Disjoint regions → clean, no mush.
-        const aP1 = Math.max(0,Math.min(1, ((transCenter+half)-t)/(2*half)));   // shape A: figure at top → dissolves down
-        const aP2 = Math.max(0,Math.min(1, (t-(transCenter-half))/(2*half)));   // shape B: emerges from water going down
-        drawTransRegion(full, subP.P1, imgA, colA, subP.frameP1, aP1, transGrowth, dim);
-        drawTransRegion(full, subP.P2, imgB, colB, subP.frameP2, aP2, transGrowth, dim);
+        // REAL Sky-&-Water: two DIFFERENT shapes. Each GROWS from nothing → full across the band (Escher growth),
+        // full opacity, the sky/water gradient showing through where a shape has shrunk away. Disjoint → crisp.
+        drawTransRegion(full, subP.P1, imgA, colA, subP.frameP1, p1, dim);
+        drawTransRegion(full, subP.P2, imgB, colB, subP.frameP2, p2, dim);
+      } else if(morphB){
+        // shape-morph: one tile whose OUTLINE interpolates A→B down the band (crisp, full opacity, fill hard-switches)
+        const localT = p2, useB = localT>=0.5;
+        const O = morphB.oA.map((q,i)=>({x:q.x+(morphB.oB[i].x-q.x)*localT, y:q.y+(morphB.oB[i].y-q.y)*localT}));
+        drawTransRegion(full, O, useB?imgB:imgA, useB?colB:colA, useB?morphB.frameB:texFrame, 1, dim);
       } else {
-        // no split: a single figure dissolving into the background (still a valid one-motif sky/water)
-        const aA = Math.max(0,Math.min(1, ((transCenter+half)-t)/(2*half)));
-        if(imgA) drawTransFig(full, scr, imgA, aA, transGrowth?(0.4+0.6*aA):1, dim);
-        else { ctx.save(); ctx.globalAlpha=aA*(dim?0.3:1); ctx.fillStyle=colA; pathPoly(ctx,scr); ctx.fill(); ctx.globalAlpha=1; ctx.restore(); }
+        // single motif growing/shrinking against the gradient
+        drawTransRegion(full, outline, imgA, colA, texFrame, p1, dim);
       }
     } else if(subP){
       // SPLIT: two differently-shaped sub-tiles in one cell — P1 → figure A / colA, P2 → figure B / colB.
@@ -1154,8 +1170,8 @@ function draw(){
     ctx.globalAlpha=1;
   }
 
-  // split-cut overlay: show the cut + its endpoints on the base tile so you can see/position it
-  if(subP){
+  // split-cut overlay: show the cut + its endpoints on the base tile (only while editing the shape) so art stays clean
+  if(subP && tool==='shape'){
     const cutScr=subP.cut.map(p=>M.apply(S,p));
     ctx.save(); ctx.strokeStyle='#00e0c0'; ctx.lineWidth=2; ctx.setLineDash([7,5]);
     ctx.beginPath(); cutScr.forEach((q,i)=>i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y)); ctx.stroke(); ctx.setLineDash([]);
@@ -1525,6 +1541,7 @@ function snapshot(includeImage){
     advEdges:advEdges?advEdges.map(a=>a?a.map(p=>({x:p.x,y:p.y})):[]):[],
     splitOn, splitCut:{ta:splitCut.ta, tb:splitCut.tb, bend:splitCut.bend},
     transOn, transDir, transCenter, transBand, transGrowth, transSky, transWater,
+    edgePtsB: edgePtsB?cloneEp(edgePtsB):null,
     colors:{A:val('colA'),B:val('colB'),out:val('colOutline'),pen:val('colPen')}};
   if(includeImage && texImageURL) o.texImageURL=texImageURL;
   if(includeImage && texImageBURL) o.texImageBURL=texImageBURL;
@@ -1615,6 +1632,8 @@ function loadState(s){
   if('transCenter' in s) transCenter=s.transCenter; if('transBand' in s) transBand=s.transBand;
   if('transGrowth' in s) transGrowth=s.transGrowth; if(s.transSky) transSky=s.transSky; if(s.transWater) transWater=s.transWater;
   if(typeof window._syncTransUI==='function') window._syncTransUI();
+  edgePtsB = s.edgePtsB ? cloneEp(s.edgePtsB) : null;
+  if(typeof window._syncShapeB==='function') window._syncShapeB();
   if(s.texImageURL){ loadTexFromURL(s.texImageURL, ()=>{ buildProcessedTex(); draw(); }); }
   if(s.texImageBURL){ loadTexBFromURL(s.texImageBURL, ()=>{ buildProcessedTex(); draw(); }); }
   // engine state (advanced tactile tiles)
@@ -2000,15 +2019,17 @@ function drawSubRegion(full, poly, img, color, frame){
   } else { pathPoly(ctx,scr); ctx.fillStyle=color; ctx.fill(); }
   ctx.restore();
 }
-// figure-ground transmutation of ONE sub-region (a split shape): the figure fades over the gradient background
-// as alpha→0 (dissolves into sky/water), and grows in as alpha→1. Regions are DISJOINT so there's no muddy overlap.
-function drawTransRegion(full, poly, img, color, frame, alpha, growth, dim){
-  if(alpha<=0.01) return;
-  const scr=poly.map(p=>M.apply(full,p));
-  ctx.save(); pathPoly(ctx,scr); ctx.clip(); ctx.globalAlpha = dim?alpha*0.3:alpha;
-  if(img && frame){
-    const s=growth?(0.4+0.6*alpha):1, sz=frame.w*s, fx=frame.x+frame.w/2-sz/2, fy=frame.y+frame.h/2-sz/2;
-    const m=M.mul(full,[sz,0,0,sz,fx,fy]), d=DPR;
+// figure-ground transmutation of ONE sub-region. presence∈[0,1] GROWS the shape about its centre (Escher growth):
+// presence 1 = full figure; presence→0 = shrinks to nothing, revealing the sky/water gradient behind it. FULL
+// opacity (crisp, no grey wash). Regions are DISJOINT so no muddy overlap. Images map to the (shrunk) shape's frame.
+function drawTransRegion(full, poly, img, color, frame, presence, dim){
+  if(presence<=0.02) return;
+  let P=poly;
+  if(presence<0.999){ let cx=0,cy=0; for(const p of poly){cx+=p.x;cy+=p.y;} cx/=poly.length; cy/=poly.length;
+    const s=Math.sqrt(presence); P=poly.map(p=>({x:cx+(p.x-cx)*s, y:cy+(p.y-cy)*s})); }   // area ~ presence
+  const scr=P.map(p=>M.apply(full,p));
+  ctx.save(); pathPoly(ctx,scr); ctx.clip(); ctx.globalAlpha = dim?0.4:1;
+  if(img){ const fr=computeTexFrame(P); const m=M.mul(full,[fr.w,0,0,fr.h,fr.x,fr.y]), d=DPR;
     ctx.setTransform(d*m[0],d*m[1],d*m[2],d*m[3],d*m[4],d*m[5]); ctx.drawImage(img,0,0,1,1); ctx.setTransform(d,0,0,d,0,0);
   } else { pathPoly(ctx,scr); ctx.fillStyle=color; ctx.fill(); }
   ctx.globalAlpha=1; ctx.restore();
@@ -3362,6 +3383,12 @@ document.getElementById('stampMode').addEventListener('change',draw);
     transBand=parseFloat(document.getElementById('transBand').value); transGrowth=document.getElementById('transGrowth').checked;
     transSky=document.getElementById('transSky').value; transWater=document.getElementById('transWater').value; draw(); };
   ['transDir','transCenter','transBand','transGrowth','transSky','transWater'].forEach(id=>{ const e=document.getElementById(id); if(e){ e.addEventListener('input',upd); e.addEventListener('change',upd); } });
+  const clrB=document.getElementById('clearShapeB');
+  const refreshB=()=>{ if(clrB) clrB.style.display=edgePtsB?'':'none'; };
+  window._syncShapeB=refreshB;
+  const sb=document.getElementById('setShapeB');
+  if(sb) sb.addEventListener('click',()=>{ if(engine==='advanced'){ dropToast('Shape-morph works in the simple engine',false); return; } pushUndo(); edgePtsB=cloneEp(edgePts); refreshB(); draw(); dropToast('✓ Shape B captured — reshape the tile to A, then it morphs A→B.'); });
+  if(clrB) clrB.addEventListener('click',()=>{ pushUndo(); edgePtsB=null; refreshB(); draw(); });
 })();
 document.getElementById('aiCell').addEventListener('click',()=>{
   const a=document.createElement('a'); a.download='tile-cell-to-fill.png'; a.href=buildCellPNG(); a.click();
@@ -3521,7 +3548,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 60 (2026-07-18)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 61 (2026-07-19)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
