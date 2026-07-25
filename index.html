@@ -200,10 +200,10 @@
   <div class="group">
     <div class="lbl">2 · Tool</div>
     <div class="tools" id="toolBar">
-      <div class="tool on" data-tool="shape"><div class="ti">✎</div><div class="tn">Shape</div></div>
-      <div class="tool" data-tool="draw"><div class="ti">🖌</div><div class="tn">Draw</div></div>
-      <div class="tool" data-tool="erase"><div class="ti">⌫</div><div class="tn">Erase</div></div>
-      <div class="tool" data-tool="pan"><div class="ti">✋</div><div class="tn">Pan</div></div>
+      <div class="tool on" data-tool="shape" title="Edit the tile shape: drag the dots (V or 1)"><div class="ti">✎</div><div class="tn">Shape <span style="opacity:.5">V</span></div></div>
+      <div class="tool" data-tool="draw" title="Draw pen strokes onto the tile (B or 2)"><div class="ti">🖌</div><div class="tn">Draw <span style="opacity:.5">B</span></div></div>
+      <div class="tool" data-tool="erase" title="Erase pen strokes you drew with the Draw tool — NOT undo (undo is ⌘Z / Ctrl+Z). (E or 3)"><div class="ti">⌫</div><div class="tn">Erase <span style="opacity:.5">E</span></div></div>
+      <div class="tool" data-tool="pan" title="Pan / zoom the view — or just HOLD SPACE from any tool. Middle-drag also pans. (H or 4)"><div class="ti">✋</div><div class="tn">Pan <span style="opacity:.5">H</span></div></div>
     </div>
   </div>
 
@@ -249,7 +249,7 @@
         <button id="expP1" style="padding:4px 9px;border-radius:6px;border:1px solid #2a3348;background:#0c0f16;color:var(--ink);font-size:11px;cursor:pointer" title="Download shape A (gold) as a transparent PNG to fill">⬇ shape A</button>
         <button id="expP2" style="padding:4px 9px;border-radius:6px;border:1px solid #2a3348;background:#0c0f16;color:var(--ink);font-size:11px;cursor:pointer" title="Download shape B (purple) as a transparent PNG to fill">⬇ shape B</button>
       </div>
-      <div class="hint" style="font-size:10px;margin-top:2px">Two <b>different shapes</b> tile together (A = <span style="color:#e3b23c">gold</span>, B = <span style="color:#9b7de0">purple</span>). Export each shape, fill it, then load as your <b>image</b> (→ A) and <b>2nd figure</b> (→ B).</div>
+      <div class="hint" style="font-size:10px;margin-top:2px"><b>Sculpt the cut</b> (with the Shape tool): drag the cyan dots, <b>click the cut line to add</b> a point, <b>right-click a point to remove</b>. The endpoints snap to the tile edge. Two <b>different shapes</b> result (A = <span style="color:#e3b23c">gold</span>, B = <span style="color:#9b7de0">purple</span>); export each, fill it, load as <b>image</b> (→ A) and <b>2nd figure</b> (→ B).</div>
     </div>
     <label class="chk" style="margin-top:10px"><input type="checkbox" id="transOn"> 🌅 Transmutation (Sky &amp; Water)</label>
     <div id="transCtl" style="display:none">
@@ -738,7 +738,8 @@ let texZoom=1, texOffX=0, texOffY=0;                  // fit the image into the 
 let texProcessed=null;                                // image with light areas blended to gap colour
 let texImageB=null, texImageBURL=null, texProcessedB=null;   // 2nd figure for the alternate cells (angel/devil style)
 // ── SPLIT TILE: cut the fundamental tile into two differently-shaped sub-tiles (2-motif different SHAPES) ──
-let splitOn=false, splitCut={ta:0.0, tb:0.5, bend:0.0};      // cut endpoints (fraction of outline) + perpendicular bend
+let splitOn=false, splitCut={ta:0.0, tb:0.5, bend:0.0, mids:[]};   // cut endpoints (fraction of outline) + draggable interior control points
+let cutDrag=null;                                            // active cut handle being dragged ('a' | 'b' | {mid idx})
 // ── TRANSMUTATION (Sky-&-Water): figure A morphs into figure B across an axis, over a two-colour gradient ──
 let transOn=false, transDir='vert', transCenter=0.5, transBand=0.45, transGrowth=true, transSky='#c3d6ea', transWater='#1d3b5e';
 let edgePtsB=null;   // a SECOND tile shape (same pattern) — the transmutation morphs the outline A→B across the band
@@ -1202,7 +1203,10 @@ function draw(){
     const cutScr=subP.cut.map(p=>M.apply(S,p));
     ctx.save(); ctx.strokeStyle='#00e0c0'; ctx.lineWidth=2; ctx.setLineDash([7,5]);
     ctx.beginPath(); cutScr.forEach((q,i)=>i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y)); ctx.stroke(); ctx.setLineDash([]);
-    [subP.A,subP.B].forEach(pt=>{ const q=M.apply(S,pt); ctx.beginPath(); ctx.arc(q.x,q.y,6,0,7); ctx.fillStyle='#00e0c0'; ctx.fill(); ctx.strokeStyle='#04322d'; ctx.lineWidth=2; ctx.stroke(); });
+    const pts=[subP.A, ...(splitCut.mids||[]), subP.B];    // endpoints (bright) + draggable interior points
+    pts.forEach((pt,i)=>{ const q=M.apply(S,pt), end=(i===0||i===pts.length-1);
+      ctx.beginPath(); ctx.arc(q.x,q.y,end?6:5,0,7); ctx.fillStyle=end?'#00e0c0':'#8afce9'; ctx.fill();
+      ctx.strokeStyle='#04322d'; ctx.lineWidth=2; ctx.stroke(); });
     ctx.restore();
   }
 
@@ -1383,6 +1387,8 @@ cv.addEventListener('contextmenu',e=>{
   e.preventDefault();
   if(engine==='advanced'){ const h=nearestAdvHandle(mouse(e),15*15);
     if(h){ pushUndo(); advEdges[h.id].splice(h.idx,1); advBuild(); draw(); } return; }
+  if(splitOn){ const ch=nearestCutHandle(mouse(e), 15*15);   // right-click a cut point removes it
+    if(ch && ch.kind==='mid'){ pushUndo(); splitCut.mids.splice(ch.idx,1); draw(); return; } }
   const h=nearestHandle(mouse(e), 14*14);
   if(!h) return;
   if(h.tan){ const p=edgePts[h.owner][h.idx]; pushUndo(); delete p.tx; delete p.ty; draw(); return; }  // reset tilt to auto
@@ -1391,9 +1397,16 @@ cv.addEventListener('contextmenu',e=>{
 
 cv.addEventListener('mousedown',e=>{
   const sp=mouse(e); const lp=toLocal(sp);
+  if(e.button===1){ e.preventDefault(); panStart={x:e.clientX-pan.x, y:e.clientY-pan.y}; return; }   // middle-drag pans from any tool
   if(tool==='pan'){ panStart={x:e.clientX-pan.x, y:e.clientY-pan.y}; return; }
   if(tool==='shape'){
     if(engine==='advanced'){ const h=nearestAdvHandle(sp,14*14); if(h){ pushUndo(); advDrag=h; } return; }
+    if(splitOn){                                            // sculpt the CUT: drag its dots, or click the cut to add one
+      const ch=nearestCutHandle(sp, 14*14);
+      if(ch){ pushUndo(); cutDrag=ch; return; }
+      const ci=nearestCutInsert(sp);
+      if(ci && ci.d < 16*16){ pushUndo(); (splitCut.mids=splitCut.mids||[]).splice(ci.k,0, toLocal(sp)); cutDrag={kind:'mid', idx:ci.k}; draw(); return; }
+    }
     const h=nearestHandle(sp, 13*13);
     if(h){ pushUndo(); drag=h; return; }
     // not on a handle: clicking the dotted edge ADDS a point there and lets you pull it right away
@@ -1409,6 +1422,13 @@ cv.addEventListener('mousedown',e=>{
 window.addEventListener('mousemove',e=>{
   if(panStart){ pan.x=e.clientX-panStart.x; pan.y=e.clientY-panStart.y; draw(); return; }
   const sp=mouse(e); const lp=toLocal(sp);
+  if(cutDrag){                                              // sculpt the cut: free interior points, endpoints snap to the boundary
+    if(cutDrag.kind==='mid'){ if(splitCut.mids && splitCut.mids[cutDrag.idx]) splitCut.mids[cutDrag.idx]={x:lp.x,y:lp.y}; }
+    else { const O=buildOutline(); let bi=0,bd=Infinity; for(let i=0;i<O.length;i++){ const d=dist2(O[i],lp); if(d<bd){bd=d;bi=i;} }
+      const frac=bi/O.length;
+      if(cutDrag.kind==='a'){ splitCut.ta=frac; const el=document.getElementById('cutA'); if(el) el.value=frac; }
+      else { splitCut.tb=frac; const el=document.getElementById('cutB'); if(el) el.value=frac; } }
+    draw(); return; }
   if(advDrag){ const el=M.apply(M.inv(advEdgeE[advDrag.id]), lp);
     advEdges[advDrag.id][advDrag.idx]={x:Math.max(0.06,Math.min(0.94,el.x)), y:el.y}; advBuild(); draw(); return; }
   if(drag && drag.tan){                                     // tilt handle: set this point's tangent (Hermite kicks in)
@@ -1426,6 +1446,7 @@ window.addEventListener('mousemove',e=>{
   if(tool==='erase' && e.buttons){ eraseAt(lp); }
 });
 window.addEventListener('mouseup',()=>{
+  if(cutDrag){ cutDrag=null; draw(); }
   if(advDrag){ advEdges[advDrag.id].sort((a,b)=>a.x-b.x); advBuild(); advDrag=null; draw(); }
   if(drag){ drag=null; draw(); }                            // already sorted live during the drag
   if(curStroke){ if(curStroke.pts.length>1) strokes.push(curStroke); curStroke=null; draw(); }
@@ -1509,13 +1530,26 @@ Object.keys(TEMPLATES).forEach(name=>{
     document.querySelectorAll('#tplGrid .pat').forEach(x=>x.classList.toggle('on',x===el)); });
   tplGrid.appendChild(el);
 });
-document.querySelectorAll('.tool').forEach(t=>t.addEventListener('click',()=>{
-  tool=t.dataset.tool;
-  document.querySelectorAll('.tool').forEach(x=>x.classList.toggle('on',x===t));
-  document.getElementById('shapeHelp').style.display = tool==='shape'?'':'none';
+function setTool(name){
+  tool=name;
+  document.querySelectorAll('.tool').forEach(x=>x.classList.toggle('on', x.dataset.tool===name));
+  const sh=document.getElementById('shapeHelp'); if(sh) sh.style.display = tool==='shape'?'':'none';
   cv.style.cursor = tool==='pan'?'grab': tool==='draw'?'crosshair': tool==='erase'?'cell':'default';
   draw();
-}));
+}
+document.querySelectorAll('.tool').forEach(t=>t.addEventListener('click',()=>setTool(t.dataset.tool)));
+// keyboard tool shortcuts + hold-Space for temporary pan (classic). Ignored while typing in a field.
+let _prevTool=null;
+window.addEventListener('keydown',e=>{
+  const el=document.activeElement; if(el && (el.tagName==='INPUT'||el.tagName==='TEXTAREA'||el.isContentEditable)) return;
+  if(e.metaKey||e.ctrlKey||e.altKey) return;                 // leave ⌘Z etc. alone
+  if(e.code==='Space'){ if(tool!=='pan'){ _prevTool=tool; setTool('pan'); } e.preventDefault(); return; }
+  const map={v:'shape','1':'shape', b:'draw','2':'draw', e:'erase','3':'erase', h:'pan','4':'pan'};
+  const t=map[e.key.toLowerCase()]; if(t){ setTool(t); e.preventDefault(); }
+});
+window.addEventListener('keyup',e=>{
+  if(e.code==='Space' && _prevTool){ setTool(_prevTool); _prevTool=null; e.preventDefault(); }   // release Space → previous tool
+});
 ['colA','colB','colOutline','colPen','twoTone','outW','penW','showHandles','dimOthers','traceImg']
   .forEach(id=>document.getElementById(id).addEventListener('input',draw));
 document.getElementById('scale').addEventListener('input',e=>{scale=+e.target.value;draw();});
@@ -1566,7 +1600,7 @@ function snapshot(includeImage){
     lastGenSource, lastGenModel, lastGenSubject,        // so 🩹 Fill works after reload
     engine, advTypeIndex, advParams:advParams?advParams.slice():null,
     advEdges:advEdges?advEdges.map(a=>a?a.map(p=>({x:p.x,y:p.y})):[]):[],
-    splitOn, splitCut:{ta:splitCut.ta, tb:splitCut.tb, bend:splitCut.bend},
+    splitOn, splitCut:{ta:splitCut.ta, tb:splitCut.tb, bend:splitCut.bend, mids:(splitCut.mids||[]).map(m=>({x:m.x,y:m.y}))},
     transOn, transDir, transCenter, transBand, transGrowth, transSky, transWater,
     edgePtsB: edgePtsB?cloneEp(edgePtsB):null,
     colors:{A:val('colA'),B:val('colB'),out:val('colOutline'),pen:val('colPen')}};
@@ -1652,7 +1686,7 @@ function loadState(s){
   lastGenModel=s.lastGenModel||''; lastGenSubject=s.lastGenSubject||'';
   texImage = null; texImageURL = null; texProcessed = null;
   texImageB = null; texImageBURL = null; texProcessedB = null;
-  splitOn = !!s.splitOn; splitCut = s.splitCut ? {ta:s.splitCut.ta, tb:s.splitCut.tb, bend:s.splitCut.bend} : {ta:0,tb:0.5,bend:0};
+  splitOn = !!s.splitOn; splitCut = s.splitCut ? {ta:s.splitCut.ta, tb:s.splitCut.tb, bend:s.splitCut.bend||0, mids:(s.splitCut.mids||[]).map(m=>({x:m.x,y:m.y}))} : {ta:0,tb:0.5,bend:0,mids:[]};
   if(typeof window._syncSplitUI==='function') window._syncSplitUI();
   transOn = !!s.transOn;
   if('transDir' in s) transDir=s.transDir;
@@ -2020,20 +2054,39 @@ function computeTexFrame(outline){
 }
 // Split the current tile outline into two sub-polygons along the cut (endpoints ta,tb on the boundary + bend).
 // Both share the exact cut curve (one uses it reversed) so deforming the cut dents one where it bumps the other.
+function cutMids(){                                          // interior control points (world coords)
+  if(splitCut.mids && splitCut.mids.length) return splitCut.mids;
+  return [];
+}
 function buildSubOutlines(){
   const O=buildOutline(), N=O.length;
   let iA=(((Math.round(splitCut.ta*N))%N)+N)%N, iB=(((Math.round(splitCut.tb*N))%N)+N)%N;
   if(iA===iB) iB=(iA+Math.floor(N/2))%N;
   const A=O[iA], B=O[iB];
-  const dx=B.x-A.x, dy=B.y-A.y, len=Math.hypot(dx,dy)||1, px=-dy/len, py=dx/len;   // perpendicular unit
-  const mx=(A.x+B.x)/2 + px*splitCut.bend*len, my=(A.y+B.y)/2 + py*splitCut.bend*len;
-  const K=28, cut=[];
-  for(let k=0;k<=K;k++){ const t=k/K, u=1-t; cut.push({x:u*u*A.x+2*u*t*mx+t*t*B.x, y:u*u*A.y+2*u*t*my+t*t*B.y}); }  // quadratic A→mid→B
+  let mids=cutMids();
+  if(!mids.length && splitCut.bend){                        // back-compat: a lone bend → one implied mid point
+    const dx=B.x-A.x, dy=B.y-A.y, len=Math.hypot(dx,dy)||1, px=-dy/len, py=dx/len;
+    mids=[{x:(A.x+B.x)/2+px*splitCut.bend*len, y:(A.y+B.y)/2+py*splitCut.bend*len}];
+  }
+  // smooth curve INTERPOLATING A, the mids, then B (same smoother as the outer edges → consistent feel)
+  let cut=smoothFull([A, ...mids, B], (typeof curvature==='number'?curvature:1), 10);
+  cut[0]=A; cut[cut.length-1]=B;                            // pin endpoints exactly onto the boundary
+  const K=cut.length-1;
   const arc=(i,j)=>{ const r=[]; let k=i; while(true){ r.push(O[k]); if(k===j) break; k=(k+1)%N; } return r; };
   const P1 = arc(iA,iB).concat(cut.slice(1,K).reverse());   // boundary A..B, then cut B..A
   const P2 = arc(iB,iA).concat(cut.slice(1,K));             // boundary B..A, then cut A..B
-  return {P1, P2, A, B, cut, frameP1:computeTexFrame(P1), frameP2:computeTexFrame(P2)};
+  return {P1, P2, A, B, cut, iA, iB, frameP1:computeTexFrame(P1), frameP2:computeTexFrame(P2)};
 }
+// cut handles: the two boundary endpoints (A,B) + every interior control point. Returns {kind:'a'|'b'|'mid', idx, p}
+function cutHandles(){ const s=buildSubOutlines(); const h=[{kind:'a',p:s.A},{kind:'b',p:s.B}];
+  (splitCut.mids||[]).forEach((m,i)=>h.push({kind:'mid',idx:i,p:m})); return h; }
+function nearestCutHandle(sp,r2){ let best=null;
+  for(const h of cutHandles()){ const d=dist2(screenOf(h.p), sp); if(d<(r2||14*14) && (!best||d<best.d)) best={h,d}; }
+  return best && best.h; }
+// where to insert a new mid when the cut curve itself is clicked (between which two control points, in screen space)
+function nearestCutInsert(sp){ const s=buildSubOutlines(); const C=[s.A, ...(splitCut.mids||[]), s.B].map(screenOf);
+  let best=null; for(let k=0;k<C.length-1;k++){ const d=segDist2(sp,C[k],C[k+1]); if(!best||d<best.d) best={k,d}; }
+  return best; }   // insert into mids at index best.k
 // draw one sub-region of a tile instance: the image mapped to its own sub-frame, else a flat colour
 function drawSubRegion(full, poly, img, color, frame){
   const scr=poly.map(p=>M.apply(full,p));
@@ -3597,7 +3650,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 62 (2026-07-19)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 63 (2026-07-25)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
