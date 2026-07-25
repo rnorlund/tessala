@@ -250,6 +250,7 @@
         <button id="expP2" style="padding:4px 9px;border-radius:6px;border:1px solid #2a3348;background:#0c0f16;color:var(--ink);font-size:11px;cursor:pointer" title="Download shape B (purple) as a transparent PNG to fill">⬇ shape B</button>
       </div>
       <div class="hint" style="font-size:10px;margin-top:2px"><b>Sculpt the cut</b> (with the Shape tool): drag the cyan dots, <b>click the cut line to add</b> a point, <b>right-click a point to remove</b>. The endpoints snap to the tile edge. Two <b>different shapes</b> result (A = <span style="color:#e3b23c">gold</span>, B = <span style="color:#9b7de0">purple</span>); export each, fill it, load as <b>image</b> (→ A) and <b>2nd figure</b> (→ B).</div>
+      <div class="hint" style="font-size:10px;margin-top:2px;color:#e0b070">⚠ On <b>rotational</b> patterns (3-fold / 4-fold / 6-fold) the two halves get spun around each centre into a <b>pinwheel</b>, not two separate figures. For two clean, readable shapes use <b>Glide, Square, Hexagon, or 2-fold</b>.</div>
     </div>
     <label class="chk" style="margin-top:10px"><input type="checkbox" id="transOn"> 🌅 Transmutation (Sky &amp; Water)</label>
     <div id="transCtl" style="display:none">
@@ -3681,7 +3682,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 65 (2026-07-25)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 66 (2026-07-25)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
