@@ -1203,10 +1203,15 @@ function draw(){
     const cutScr=subP.cut.map(p=>M.apply(S,p));
     ctx.save(); ctx.strokeStyle='#00e0c0'; ctx.lineWidth=2; ctx.setLineDash([7,5]);
     ctx.beginPath(); cutScr.forEach((q,i)=>i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y)); ctx.stroke(); ctx.setLineDash([]);
-    const pts=[subP.A, ...(splitCut.mids||[]), subP.B];    // endpoints (bright) + draggable interior points
-    pts.forEach((pt,i)=>{ const q=M.apply(S,pt), end=(i===0||i===pts.length-1);
-      ctx.beginPath(); ctx.arc(q.x,q.y,end?6:5,0,7); ctx.fillStyle=end?'#00e0c0':'#8afce9'; ctx.fill();
-      ctx.strokeStyle='#04322d'; ctx.lineWidth=2; ctx.stroke(); });
+    const mids=splitCut.mids||[];
+    const showTan=document.getElementById('showHandles') && document.getElementById('showHandles').checked;
+    if(showTan){ mids.forEach((m,i)=>{ if(m.corner) return; const t=cutTanDisp(mids,i,subP.A,subP.B), q0=M.apply(S,m), q1=M.apply(S,t);
+      ctx.strokeStyle='#4fe9d0'; ctx.lineWidth=1.5; ctx.beginPath(); ctx.moveTo(q0.x,q0.y); ctx.lineTo(q1.x,q1.y); ctx.stroke();
+      ctx.beginPath(); ctx.arc(q1.x,q1.y,4,0,7); ctx.fillStyle='#4fe9d0'; ctx.fill(); ctx.strokeStyle='#04322d'; ctx.stroke(); }); }
+    const nodes=[{p:subP.A,end:1}].concat(mids.map(m=>({p:m,corner:!!m.corner}))).concat([{p:subP.B,end:1}]);
+    nodes.forEach(o=>{ const q=M.apply(S,o.p); ctx.fillStyle=o.end?'#00e0c0':'#8afce9'; ctx.strokeStyle='#04322d'; ctx.lineWidth=2;
+      if(o.corner){ ctx.beginPath(); ctx.rect(q.x-5,q.y-5,10,10); ctx.fill(); ctx.stroke(); }   // ◻ square = sharp/pointy
+      else { ctx.beginPath(); ctx.arc(q.x,q.y,o.end?6:5,0,7); ctx.fill(); ctx.stroke(); } });    // ◯ circle = smooth/curvy
     ctx.restore();
   }
 
@@ -1304,12 +1309,15 @@ function getHandles(){
       edgePts[i].forEach((p,idx)=>{
         hs.push({disp:p, owner:i, idx, kind:'self', corner:!!p.corner, toStore:toFirstHalf});
         hs.push({disp:{x:2*Mc.x-p.x,y:2*Mc.y-p.y}, owner:i, idx, kind:'selfMirror', corner:!!p.corner, toStore:toFirstHalf});
-        if(showTan && !p.corner) hs.push({disp:tanDisp(i,idx), owner:i, idx, kind:'tangent', tan:true});
+        if(showTan && !p.corner){ const td=tanDisp(i,idx);
+          hs.push({disp:td, owner:i, idx, kind:'tangent', tan:true});
+          hs.push({disp:{x:2*Mc.x-td.x, y:2*Mc.y-td.y}, owner:i, idx, kind:'tangent', tan:true, mirrorMc:Mc}); }   // curve handle on the MIRROR half too
       });
-    } else { // slave — handles map back to the master via the inverse transform
+    } else { // slave — handles map back to the master via the inverse transform (curve handles too, so BOTH sides pull)
       const pr=pat.pairings.find(p=>p.s===i), j=pr.m, g=pr.g, gi=M.inv(g);
-      edgePts[j].forEach((p,idx)=>hs.push({disp:M.apply(g,p), owner:j, idx, kind:'slave', corner:!!p.corner,
-        toStore:lp=>M.apply(gi,lp)}));
+      edgePts[j].forEach((p,idx)=>{ hs.push({disp:M.apply(g,p), owner:j, idx, kind:'slave', corner:!!p.corner,
+        toStore:lp=>M.apply(gi,lp)});
+        if(showTan && !p.corner) hs.push({disp:M.apply(g, tanDisp(j,idx)), owner:j, idx, kind:'tangent', tan:true, slaveGi:gi}); });
     }
   }
   return hs;
@@ -1387,7 +1395,8 @@ cv.addEventListener('contextmenu',e=>{
   e.preventDefault();
   if(engine==='advanced'){ const h=nearestAdvHandle(mouse(e),15*15);
     if(h){ pushUndo(); advEdges[h.id].splice(h.idx,1); advBuild(); draw(); } return; }
-  if(splitOn){ const ch=nearestCutHandle(mouse(e), 15*15);   // right-click a cut point removes it
+  if(splitOn){ const ch=nearestCutHandle(mouse(e), 15*15);   // right-click: reset a curve handle, or remove a cut point
+    if(ch && ch.kind==='cutTan'){ pushUndo(); const m=splitCut.mids[ch.idx]; delete m.tx; delete m.ty; draw(); return; }
     if(ch && ch.kind==='mid'){ pushUndo(); splitCut.mids.splice(ch.idx,1); draw(); return; } }
   const h=nearestHandle(mouse(e), 14*14);
   if(!h) return;
@@ -1422,8 +1431,10 @@ cv.addEventListener('mousedown',e=>{
 window.addEventListener('mousemove',e=>{
   if(panStart){ pan.x=e.clientX-panStart.x; pan.y=e.clientY-panStart.y; draw(); return; }
   const sp=mouse(e); const lp=toLocal(sp);
-  if(cutDrag){                                              // sculpt the cut: free interior points, endpoints snap to the boundary
-    if(cutDrag.kind==='mid'){ if(splitCut.mids && splitCut.mids[cutDrag.idx]) splitCut.mids[cutDrag.idx]={x:lp.x,y:lp.y}; }
+  if(cutDrag){                                              // sculpt the cut: interior points, their tangents, endpoints
+    const mids=splitCut.mids||[];
+    if(cutDrag.kind==='cutTan'){ const m=mids[cutDrag.idx]; if(m){ m.tx=lp.x-m.x; m.ty=lp.y-m.y; } }
+    else if(cutDrag.kind==='mid'){ const o=mids[cutDrag.idx]; if(o) mids[cutDrag.idx]={x:lp.x,y:lp.y, corner:o.corner, tx:o.tx, ty:o.ty}; }  // keep corner/tilt while moving
     else { const O=buildOutline(); let bi=0,bd=Infinity; for(let i=0;i<O.length;i++){ const d=dist2(O[i],lp); if(d<bd){bd=d;bi=i;} }
       const frac=bi/O.length;
       if(cutDrag.kind==='a'){ splitCut.ta=frac; const el=document.getElementById('cutA'); if(el) el.value=frac; }
@@ -1432,7 +1443,11 @@ window.addEventListener('mousemove',e=>{
   if(advDrag){ const el=M.apply(M.inv(advEdgeE[advDrag.id]), lp);
     advEdges[advDrag.id][advDrag.idx]={x:Math.max(0.06,Math.min(0.94,el.x)), y:el.y}; advBuild(); draw(); return; }
   if(drag && drag.tan){                                     // tilt handle: set this point's tangent (Hermite kicks in)
-    const p=edgePts[drag.owner][drag.idx]; p.tx=lp.x-p.x; p.ty=lp.y-p.y; draw(); return; }
+    const p=edgePts[drag.owner][drag.idx];
+    let mp=lp;                                              // map the mirror/slave handle back to the owning point's frame
+    if(drag.slaveGi) mp=M.apply(drag.slaveGi,lp);
+    else if(drag.mirrorMc) mp={x:2*drag.mirrorMc.x-lp.x, y:2*drag.mirrorMc.y-lp.y};
+    p.tx=mp.x-p.x; p.ty=mp.y-p.y; draw(); return; }
   if(drag){ const was=edgePts[drag.owner][drag.idx], np=drag.toStore(lp);
     if(was&&was.corner) np.corner=true;                    // keep sharp/smooth state while dragging
     if(was&&was.tx!=null){ np.tx=was.tx; np.ty=was.ty; }   // keep tilt when moving the point itself
@@ -1465,7 +1480,9 @@ cv.addEventListener('dblclick',e=>{
     return;
   }
   // simple engine: single click on the edge adds a point (see mousedown);
-  // double-click an existing point toggles it sharp corner <-> smooth curve
+  // double-click an existing point toggles it sharp corner (square) <-> smooth curve (circle) — same on cut points
+  if(splitOn){ const ch=nearestCutHandle(sp,12*12);
+    if(ch && ch.kind==='mid'){ pushUndo(); const m=splitCut.mids[ch.idx]; m.corner=!m.corner; if(m.corner){ delete m.tx; delete m.ty; } draw(); return; } }
   const h=nearestHandle(sp, 12*12);
   if(h){ const p=edgePts[h.owner][h.idx]; pushUndo(); p.corner=!p.corner; draw(); }
 });
@@ -2077,9 +2094,17 @@ function buildSubOutlines(){
   const P2 = arc(iB,iA).concat(cut.slice(1,K));             // boundary B..A, then cut A..B
   return {P1, P2, A, B, cut, iA, iB, frameP1:computeTexFrame(P1), frameP2:computeTexFrame(P2)};
 }
-// cut handles: the two boundary endpoints (A,B) + every interior control point. Returns {kind:'a'|'b'|'mid', idx, p}
-function cutHandles(){ const s=buildSubOutlines(); const h=[{kind:'a',p:s.A},{kind:'b',p:s.B}];
-  (splitCut.mids||[]).forEach((m,i)=>h.push({kind:'mid',idx:i,p:m})); return h; }
+// display position of a cut point's tangent (curve) handle — override tx/ty, else auto Catmull-Rom from neighbours
+function cutTanDisp(mids,i,A,B){ const m=mids[i]; let tx,ty;
+  if(m.tx!=null){tx=m.tx;ty=m.ty;} else { const a=mids[i-1]||A, b=mids[i+1]||B; tx=(b.x-a.x)*0.5; ty=(b.y-a.y)*0.5; }
+  const L=Math.hypot(tx,ty)||1, dl=Math.max(L,0.14); return {x:m.x+tx/L*dl, y:m.y+ty/L*dl}; }
+// cut handles: endpoints (A,B) + every interior point + (unless it's a corner) its tangent handle
+function cutHandles(){ const s=buildSubOutlines(), mids=splitCut.mids||[];
+  const showTan=document.getElementById('showHandles') && document.getElementById('showHandles').checked;
+  const h=[{kind:'a',p:s.A},{kind:'b',p:s.B}];
+  mids.forEach((m,i)=>{ h.push({kind:'mid',idx:i,p:m,corner:!!m.corner});
+    if(showTan && !m.corner) h.push({kind:'cutTan',idx:i,p:cutTanDisp(mids,i,s.A,s.B)}); });
+  return h; }
 function nearestCutHandle(sp,r2){ let best=null;
   for(const h of cutHandles()){ const d=dist2(screenOf(h.p), sp); if(d<(r2||14*14) && (!best||d<best.d)) best={h,d}; }
   return best && best.h; }
@@ -3650,7 +3675,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 63 (2026-07-25)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 64 (2026-07-25)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
