@@ -1625,10 +1625,16 @@ function snapshot(includeImage){
   if(includeImage && texImageBURL) o.texImageBURL=texImageBURL;
   return JSON.stringify(o);
 }
+let lastSaveName='';
 document.getElementById('btnSave').addEventListener('click',()=>{
-  try{ localStorage.setItem('tessellator', snapshot(false)); }catch(e){}  // image too big for localStorage
+  const def = lastSaveName || ((lastGenSubject && lastGenSubject!=='your image') ? lastGenSubject : '') || 'tessellation';
+  let name = prompt('Save design as…  (“.json” is added; it goes to your Downloads)', def);
+  if(name===null) return;                                   // cancelled → don't save
+  name = (name.trim()||def).replace(/[^\w\- ]+/g,'').trim().replace(/\s+/g,'-').slice(0,60) || 'tessellation';
+  lastSaveName = name;
+  try{ localStorage.setItem('tessellator', snapshot(false)); }catch(e){}   // image too big for localStorage
   const a=document.createElement('a');
-  a.download='tessellation.json';
+  a.download = name + '.json';
   a.href='data:application/json,'+encodeURIComponent(snapshot(true)); a.click();   // full, self-contained
 });
 document.getElementById('btnLoad').addEventListener('click',()=>{
@@ -3675,7 +3681,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 64 (2026-07-25)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 65 (2026-07-25)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
