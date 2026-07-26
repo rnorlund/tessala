@@ -706,11 +706,24 @@ function setShape(name){
   }
 }
 function resetShape(){ setShape('Wave'); }
+// A clean "down the middle" cut for the current tile: endpoints at the midpoints of two opposite edges,
+// no interior points. Called whenever the base tile changes so a stale cut can't leak in (it'd be in the
+// old tile's coordinates). The cut stays fully user-adjustable after this.
+function resetSplitCut(){
+  const n=(engine!=='advanced' && pat)?pat.n:4, a0=0.5/n;
+  splitCut={ta:a0, tb:a0+0.5, bend:0, mids:[]};
+  const A=document.getElementById('cutA'), B=document.getElementById('cutB'), Bn=document.getElementById('cutBend');
+  if(A)A.value=a0; if(B)B.value=a0+0.5; if(Bn)Bn.value=0;
+  // shape B (transmutation morph target) is tied to the OLD tile's vertex count — drop it so a pattern
+  // switch can't feed a mismatched edgePtsB into outlineOf() (was crashing: "ep[i] is not iterable").
+  edgePtsB=null; if(typeof window!=='undefined' && window._syncShapeB) window._syncShapeB();
+}
 function setPattern(type){
   engine='simple';
   const adv=document.getElementById('advCtl'); if(adv){ adv.style.display='none'; document.getElementById('btnAdvanced').style.display=''; }
   pat=buildPattern(type);
   resetShape();
+  resetSplitCut();                     // fresh, simple cut for the new tile (no stale points leaking in)
   document.querySelectorAll('.pat').forEach(e=>e.classList.toggle('on', e.dataset.type===type));
   const p=PATTERNS.find(p=>p.type===type);
   document.getElementById('patPill').innerHTML='<b>'+p.name+'</b> · '+p.gp;
@@ -3544,10 +3557,10 @@ function enterAdvanced(index){
   document.querySelectorAll('.pat').forEach(e=>e.classList.remove('on'));
   document.getElementById('advCtl').style.display='';
   document.getElementById('btnAdvanced').style.display='none';
-  advTypeIndex=index; advParams=null; advEdges=[]; advBuild(); advUI();
+  advTypeIndex=index; advParams=null; advEdges=[]; advBuild(); resetSplitCut(); advUI();
   const s=document.getElementById('wizSym'); if(s) s.value='current';   // AI fill now defaults to THIS chosen tile
 }
-function advGo(i){ advTypeIndex=((i%81)+81)%81; advParams=null; advEdges=[]; advBuild(); advUI(); draw(); }
+function advGo(i){ advTypeIndex=((i%81)+81)%81; advParams=null; advEdges=[]; advBuild(); resetSplitCut(); advUI(); draw(); }
 // ---- "Choose a tiling" gallery: live thumbnail of every isohedral type ----
 function drawTactileThumb(idx, cvEl){
   const ctx=cvEl.getContext('2d'), W=cvEl.width, H=cvEl.height;
@@ -3683,7 +3696,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 67 (2026-07-26)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 68 (2026-07-26)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
