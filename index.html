@@ -3715,8 +3715,119 @@ document.getElementById('tgRight').addEventListener('click',()=>togglePanel('sid
 document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('side',true));
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
+/* ===== Tooltips on every control (title=) — applied at load + to anything added later ===== */
+const TOOLTIPS={
+  // colours & style
+  colA:"Fill colour for the main set of tiles.",
+  colB:"Fill colour for the ALTERNATE set of tiles (used when ‘Alternate…’ is on, or as figure B when split).",
+  colOutline:"Colour of the black tile outline.",
+  colPen:"Colour of the freehand Draw pen.",
+  twoTone:"Colour neighbouring tiles with the two fill colours alternately (checkerboard by rotation/reflection).",
+  outW:"Thickness of the tile outline (0 = no outline).",
+  penW:"Thickness of the Draw / pen strokes.",
+  showHandles:"Show the draggable edit dots and curve handles on the tile (Shape tool).",
+  dimOthers:"Fade every tile except the one you’re editing, so the edit tile stands out.",
+  traceImg:"Show your imported image faintly behind the tile so you can trace its outline.",
+  scale:"Zoom the view in/out — also sets how large each tile is drawn.",
+  // split
+  splitOn:"Cut each tile into TWO different shapes along a cut line (for two-creature tilings). Edit the cut with the Shape tool: drag its dots, click the line to add a point, right-click to remove.",
+  cutA:"Move where the cut STARTS on the tile’s edge.",
+  cutB:"Move where the cut ENDS on the tile’s edge.",
+  cutBend:"Bow a straight cut into a curve (− one way, + the other). Or drag the cut’s cyan dots directly for full control.",
+  // transmutation
+  transOn:"Sky-&-Water transmutation: shapes gradually morph from one form into another across the tiling, over a two-colour gradient. Turn on Split first for the classic figure-ground effect.",
+  transDir:"Direction the morph travels: vertical (top→bottom), horizontal, or diagonal.",
+  transCenter:"Where along the axis the morph happens (0 = near the start, 1 = near the end).",
+  transBand:"Width of the transition zone (small = a sharp change, large = a gradual morph).",
+  transGrowth:"Make each figure grow in from nothing / shrink away, revealing the background gradient.",
+  transSky:"Background colour at the START of the gradient (the ‘sky’).",
+  transWater:"Background colour at the END of the gradient (the ‘water’).",
+  // main toolbar
+  btnReset:"Reset just the tile’s SHAPE to the default wavy edges (keeps your colours & pattern).",
+  btnClearDraw:"Erase all freehand pen strokes.",
+  btnPng:"Download the whole tessellation as a PNG (resolution set by the ×N menu beside it).",
+  btnSave:"Save this design to a .json file (you choose the name) so you can reopen it later.",
+  btnLoad:"Open a design you saved earlier (.json) — or just drag the file onto the window.",
+  btnSaveColl:"Save this tile to your in-browser collection for quick reuse.",
+  btnUndo:"Undo the last change (⌘Z / Ctrl+Z). Redo = ⌘⇧Z / Ctrl+Shift+Z.",
+  btnAI:"Fill the tile with a creature using AI (ChatGPT with your key, or a local model on the Spark).",
+  btnGen:"Auto-generate random interlocking tile ideas you can evolve and pick from.",
+  btnAdvanced:"Browse all 81 isohedral tilings and pick one visually.",
+  btnSimple:"Go back to the 6 simple patterns.",
+  // advanced engine
+  advPrev:"Previous tiling type.",
+  advNext:"Next tiling type.",
+  advVary:"Randomise this tiling’s corner positions for a new variation.",
+  advVaryEdges:"Randomly deform the edges into wavy shapes (stays a valid gap-free tiling).",
+  advReset:"Reset the edges back to straight (plain polygon).",
+  // idea generator
+  genSize:"Base size of the generated tiles.",
+  genCurve:"Edge smoothness of the generated tiles.",
+  genSteps:"Curve resolution — higher = smoother curves.",
+  genWild:"How wild / irregular the random shapes are.",
+  genDetail:"How many bumps / control points per edge.",
+  genLobe:"Tendency to form rounded lobes.",
+  genSpike:"Chance of spiky protrusions.",
+  genMix:"Mix in random tiling types, not just the current one.",
+  genNew:"Generate a fresh batch of random tile ideas.",
+  genEvolve:"Breed new tiles from the ones you ♥ liked.",
+  genSavedBtn:"Show the tiles you’ve saved.",
+  genClose:"Close.", symClose:"Close.", aiClose:"Close.",
+  // AI wizard / fill
+  aiUse:"Show the generated image as the tile fill.",
+  aiZoom:"Zoom the fill image inside the tile.",
+  aiOffX:"Nudge the fill image left / right inside the tile.",
+  aiOffY:"Nudge the fill image up / down inside the tile.",
+  gapColor:"Colour of the empty space around the figure (the negative space).",
+  blendWhite:"Blend the image’s light areas into the gap colour (hides a white background).",
+  blendAmt:"How light a pixel must be to count as background for that blend.",
+  stampMode:"Drop the whole image on each tile without clipping (stamp), instead of filling the tile’s shape.",
+  wizSpacing:"Inset each figure and surround it with the gap colour — guaranteed white space, more legible.",
+  wizGap:"Colour of the gap / negative space for AI fills.",
+  useFlux:"Use the Spark’s local Flux-Fill model to grow the figure (free, ~6 min) instead of ChatGPT.",
+  localRedraw:"Gap-free redraw (denser) vs. placing your clean drawing (crisper).",
+  aiSubjectA:"What creature / subject to generate.", aiSubject:"What creature / subject to generate.",
+  wizSym:"Which tiling to fit the generated figure into.",
+  wizBackend:"Run the local model on this Mac, or on the Spark / a remote ComfyUI.",
+  wizBackendURL:"Address of the remote ComfyUI (e.g. the Spark tunnel URL).",
+  wizModel:"Which local image model to use.",
+  imgSym:"Which tile shape to fit your uploaded image into.",
+  aiKey:"Your OpenAI API key — stored ONLY in this browser (localStorage), never in the code or uploaded.",
+  wizName:"Optional name for your uploaded subject.",
+  aiRefBtn:"Attach a reference image for the AI to draw from.",
+  aiFitShape:"Reshape the tile to match your imported image’s outline.",
+  aiImport:"Import the AI-generated image as the tile fill.",
+  aiCopy:"Copy the AI prompt to your clipboard.",
+  aiRemove:"Remove the current fill image."
+};
+const PATTIP={
+  sqT:"Square grid — tiles repeat by sliding (translation). The simplest tiling.",
+  hexT:"Hexagon — six-sided cells that repeat by sliding.",
+  rot2:"2-fold — neighbours are rotated 180° (upright + upside-down).",
+  rot3:"3-fold — tiles spin 120° around points (pinwheel rosettes).",
+  rot4:"4-fold — tiles spin 90° around points (pinwheel).",
+  glide:"Glide — reflected + shifted rows (offset like footprints). Best for clean, readable figures."
+};
+const TPLTIP={
+  Plain:"Straight edges (undeformed base polygon).",
+  Wave:"Gentle S-curve edges — the default starting shape.",
+  Jigsaw:"Interlocking jigsaw knobs.",
+  Bird:"A bird-like interlocking profile to start from.",
+  Fish:"A fish-like interlocking profile to start from.",
+  Claw:"A clawed / hooked profile to start from."
+};
+function applyTooltips(){
+  for(const id in TOOLTIPS){ const el=document.getElementById(id); if(el && !el.title) el.title=TOOLTIPS[id]; }
+  document.querySelectorAll('.pat[data-type]').forEach(el=>{ if(!el.title && PATTIP[el.dataset.type]) el.title=PATTIP[el.dataset.type]; });
+  document.querySelectorAll('[data-tpl]').forEach(el=>{ if(!el.title) el.title=TPLTIP[el.dataset.tpl]||('Starter shape: '+el.dataset.tpl); });
+  document.querySelectorAll('#advCtl input[type=range]').forEach(el=>{ if(!el.title) el.title="Adjust this tiling type’s geometry (changes the tile’s proportions while staying a valid tiling)."; });
+  document.querySelectorAll('#symGrid .symCell, #symGrid > div').forEach(el=>{ if(!el.title) el.title="Pick this isohedral tiling type."; });
+}
+applyTooltips();
+try{ new MutationObserver(()=>applyTooltips()).observe(document.body,{childList:true,subtree:true}); }catch(e){}
+
 /* boot */
-const APP_VERSION = 'build 69 (2026-07-26)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 70 (2026-07-26)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
