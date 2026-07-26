@@ -710,10 +710,27 @@ function resetShape(){ setShape('Wave'); }
 // no interior points. Called whenever the base tile changes so a stale cut can't leak in (it'd be in the
 // old tile's coordinates). The cut stays fully user-adjustable after this.
 function resetSplitCut(){
-  const n=(engine!=='advanced' && pat)?pat.n:4, a0=0.5/n;
-  splitCut={ta:a0, tb:a0+0.5, bend:0, mids:[]};
+  // Pick a clean, BALANCED "down the middle" cut for ANY tile by trying several candidate endpoint pairs and
+  // keeping the one whose two halves are most equal in area (guards against the degenerate "sliver" cuts that a
+  // fixed endpoint choice produces on some advanced prototiles with uneven/awkward boundary geometry).
+  const parea=p=>{ let a=0; for(let i=0;i<p.length;i++){ const q=p[i], r=p[(i+1)%p.length]; a+=q.x*r.y-r.x*q.y; } return Math.abs(a/2); };
+  const cand=[[0.0,0.5],[0.02,0.52],[0.1,0.6],[0.25,0.75],[0.15,0.5],[0.05,0.4],[0.2,0.7],[0.3,0.8],[0.12,0.62],[0.08,0.58],[0.18,0.68],[0.35,0.85],[0.4,0.9],[0.22,0.62]];
+  let best=null, bestBal=-2;
+  for(const [fa,fb] of cand){ splitCut={ta:fa,tb:fb,bend:0,mids:[]};
+    try{ const s=buildSubOutlines(); const a1=parea(s.P1), a2=parea(s.P2); let bal=Math.min(a1,a2)/((a1+a2)||1);
+      if(typeof simple==='function' && (!simple(s.P1)||!simple(s.P2))) bal-=1;   // reject cuts whose halves self-intersect (concave tiles)
+      if(bal>bestBal){ bestBal=bal; best={ta:fa,tb:fb}; } }catch(e){} }
+  const ta=best?best.ta:0.02, tb=best?best.tb:0.52;
+  splitCut={ta, tb, bend:0, mids:[]};
+  // Concave-tile fallback: if the straight cut's halves self-intersect (chord exits the shape), route the cut
+  // through the tile centroid so both halves stay inside and simple.
+  try{ const s=buildSubOutlines();
+    if(typeof simple==='function' && (!simple(s.P1)||!simple(s.P2))){
+      const c=centroid(buildOutline()); splitCut.mids=[{x:c.x,y:c.y}];
+      const s2=buildSubOutlines(); if(!(simple(s2.P1)&&simple(s2.P2))) splitCut.mids=[];  // no improvement → leave straight
+    } }catch(e){}
   const A=document.getElementById('cutA'), B=document.getElementById('cutB'), Bn=document.getElementById('cutBend');
-  if(A)A.value=a0; if(B)B.value=a0+0.5; if(Bn)Bn.value=0;
+  if(A)A.value=ta; if(B)B.value=tb; if(Bn)Bn.value=0;
   // shape B (transmutation morph target) is tied to the OLD tile's vertex count — drop it so a pattern
   // switch can't feed a mismatched edgePtsB into outlineOf() (was crashing: "ep[i] is not iterable").
   edgePtsB=null; if(typeof window!=='undefined' && window._syncShapeB) window._syncShapeB();
@@ -1449,8 +1466,8 @@ window.addEventListener('mousemove',e=>{
     const mids=splitCut.mids||[];
     if(cutDrag.kind==='cutTan'){ const m=mids[cutDrag.idx]; if(m){ m.tx=lp.x-m.x; m.ty=lp.y-m.y; } }
     else if(cutDrag.kind==='mid'){ const o=mids[cutDrag.idx]; if(o) mids[cutDrag.idx]={x:lp.x,y:lp.y, corner:o.corner, tx:o.tx, ty:o.ty}; }  // keep corner/tilt while moving
-    else { const O=buildOutline(); let bi=0,bd=Infinity; for(let i=0;i<O.length;i++){ const d=dist2(O[i],lp); if(d<bd){bd=d;bi=i;} }
-      const frac=bi/O.length;
+    else { const O=resampleClosed(buildOutline(),240); let bi=0,bd=Infinity; for(let i=0;i<O.length;i++){ const d=dist2(O[i],lp); if(d<bd){bd=d;bi=i;} }
+      const frac=bi/O.length;   // dense resample → junction points glide freely along any edge (incl. straight ones)
       if(cutDrag.kind==='a'){ splitCut.ta=frac; const el=document.getElementById('cutA'); if(el) el.value=frac; }
       else { splitCut.tb=frac; const el=document.getElementById('cutB'); if(el) el.value=frac; } }
     draw(); return; }
@@ -2097,7 +2114,10 @@ function cutMids(){                                          // interior control
   return [];
 }
 function buildSubOutlines(){
-  const O=buildOutline(), N=O.length;
+  // Resample to a fixed dense resolution so cut endpoints can sit ANYWHERE on the boundary (mid-edge too).
+  // Without this, a coarse outline (e.g. a 3-vertex triangle prototile) forces corner-to-corner cuts → a
+  // degenerate zero-area sliver on one side.
+  const O=resampleClosed(buildOutline(), 240), N=O.length;
   let iA=(((Math.round(splitCut.ta*N))%N)+N)%N, iB=(((Math.round(splitCut.tb*N))%N)+N)%N;
   if(iA===iB) iB=(iA+Math.floor(N/2))%N;
   const A=O[iA], B=O[iB];
@@ -3696,7 +3716,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 68 (2026-07-26)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 69 (2026-07-26)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
