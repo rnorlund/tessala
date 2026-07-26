@@ -1394,11 +1394,11 @@ function nearestAdvHandle(sp,r2){ let best=null;
 cv.addEventListener('contextmenu',e=>{
   if(tool!=='shape'){e.preventDefault();return;}
   e.preventDefault();
-  if(engine==='advanced'){ const h=nearestAdvHandle(mouse(e),15*15);
-    if(h){ pushUndo(); advEdges[h.id].splice(h.idx,1); advBuild(); draw(); } return; }
-  if(splitOn){ const ch=nearestCutHandle(mouse(e), 15*15);   // right-click: reset a curve handle, or remove a cut point
+  if(splitOn){ const ch=nearestCutHandle(mouse(e), 15*15);   // right-click (both engines): reset a curve handle, or remove a cut point
     if(ch && ch.kind==='cutTan'){ pushUndo(); const m=splitCut.mids[ch.idx]; delete m.tx; delete m.ty; draw(); return; }
     if(ch && ch.kind==='mid'){ pushUndo(); splitCut.mids.splice(ch.idx,1); draw(); return; } }
+  if(engine==='advanced'){ const h=nearestAdvHandle(mouse(e),15*15);
+    if(h){ pushUndo(); advEdges[h.id].splice(h.idx,1); advBuild(); draw(); } return; }
   const h=nearestHandle(mouse(e), 14*14);
   if(!h) return;
   if(h.tan){ const p=edgePts[h.owner][h.idx]; pushUndo(); delete p.tx; delete p.ty; draw(); return; }  // reset tilt to auto
@@ -1410,13 +1410,13 @@ cv.addEventListener('mousedown',e=>{
   if(e.button===1){ e.preventDefault(); panStart={x:e.clientX-pan.x, y:e.clientY-pan.y}; return; }   // middle-drag pans from any tool
   if(tool==='pan'){ panStart={x:e.clientX-pan.x, y:e.clientY-pan.y}; return; }
   if(tool==='shape'){
-    if(engine==='advanced'){ const h=nearestAdvHandle(sp,14*14); if(h){ pushUndo(); advDrag=h; } return; }
-    if(splitOn){                                            // sculpt the CUT: drag its dots, or click the cut to add one
+    if(splitOn){                                            // sculpt the CUT (works in BOTH engines): drag its dots, or click the cut to add one
       const ch=nearestCutHandle(sp, 14*14);
       if(ch){ pushUndo(); cutDrag=ch; return; }
       const ci=nearestCutInsert(sp);
       if(ci && ci.d < 16*16){ pushUndo(); (splitCut.mids=splitCut.mids||[]).splice(ci.k,0, toLocal(sp)); cutDrag={kind:'mid', idx:ci.k}; draw(); return; }
     }
+    if(engine==='advanced'){ const h=nearestAdvHandle(sp,14*14); if(h){ pushUndo(); advDrag=h; } return; }
     const h=nearestHandle(sp, 13*13);
     if(h){ pushUndo(); drag=h; return; }
     // not on a handle: clicking the dotted edge ADDS a point there and lets you pull it right away
@@ -1471,6 +1471,9 @@ window.addEventListener('mouseup',()=>{
 cv.addEventListener('dblclick',e=>{
   if(tool!=='shape') return;
   const sp=mouse(e);
+  // double-click a CUT point toggles sharp(square)/smooth(circle) — works in BOTH engines
+  if(splitOn){ const ch=nearestCutHandle(sp,12*12);
+    if(ch && ch.kind==='mid'){ pushUndo(); const m=splitCut.mids[ch.idx]; m.corner=!m.corner; if(m.corner){ delete m.tx; delete m.ty; } draw(); return; } }
   if(engine==='advanced'){   // add a control point to the nearest edge
     let best=null;
     for(const id in advEdgeE){ const E=advEdgeE[id];
@@ -1481,9 +1484,7 @@ cv.addEventListener('dblclick',e=>{
     return;
   }
   // simple engine: single click on the edge adds a point (see mousedown);
-  // double-click an existing point toggles it sharp corner (square) <-> smooth curve (circle) — same on cut points
-  if(splitOn){ const ch=nearestCutHandle(sp,12*12);
-    if(ch && ch.kind==='mid'){ pushUndo(); const m=splitCut.mids[ch.idx]; m.corner=!m.corner; if(m.corner){ delete m.tx; delete m.ty; } draw(); return; } }
+  // double-click an existing point toggles it sharp corner (square) <-> smooth curve (circle)
   const h=nearestHandle(sp, 12*12);
   if(h){ const p=edgePts[h.owner][h.idx]; pushUndo(); p.corner=!p.corner; draw(); }
 });
@@ -3682,7 +3683,7 @@ document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('si
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
 
 /* boot */
-const APP_VERSION = 'build 66 (2026-07-25)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 67 (2026-07-26)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
