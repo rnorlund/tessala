@@ -215,9 +215,10 @@
 
   <div class="group" id="shapeHelp">
     <div class="hint">
-      <b>Shape tool:</b> click the dotted edge to add a dot and drag it — the matching edge updates so it still tiles.
-      Drag the small <b style="color:#5fe39a">green tilt handle</b> off each dot to bend/round the curve there (right-click it to reset).
-      <b>Double-click a dot</b> to switch it ◻ sharp corner ↔ ◯ smooth curve. <b>Right-click</b> a dot to delete it.
+      <b>Shape tool.</b> Two handle types:
+      <span style="white-space:nowrap">● <b style="color:#fff">white/gold/blue dots</b> = <b>MOVE</b> the point</span> ·
+      <span style="white-space:nowrap"><b style="color:#ff5db1">◦ pink handles</b> = <b>BEND</b> the curve</span> (drag the pink ring; right-click it to reset).
+      Click the dotted edge to <b>add</b> a dot; <b>double-click</b> a dot to switch ◻ sharp ↔ ◯ smooth; <b>right-click</b> a dot to delete it.
     </div>
   </div>
 
@@ -236,11 +237,13 @@
     </div>
     <label class="chk" style="margin-top:10px"><input type="checkbox" id="twoTone" checked> Alternate two fill colors / figures</label>
     <label class="chk" style="margin-top:6px"><input type="checkbox" id="shade" checked> Shaded fills (soft gradient — richer look)</label>
-    <div class="row" style="margin-top:4px;gap:6px">
-      <button id="figB" style="padding:4px 9px;border-radius:6px;border:1px solid #2a3348;background:#0c0f16;color:var(--ink);font-size:11px;cursor:pointer" title="Load a 2nd figure for the alternate cells — Angel-&-Devil style (same tile shape, two fillings)">＋ 2nd figure (B)…</button>
+    <div class="row" style="margin-top:4px;gap:6px;flex-wrap:wrap">
+      <button id="expTile" style="padding:4px 9px;border-radius:6px;border:1px solid #2a3348;background:#0c0f16;color:var(--ink);font-size:11px;cursor:pointer" title="Download the tile's silhouette as a transparent PNG. Paint your figure inside that outline, then load it back as the main image (A) or as the 2nd figure (B).">⬇ tile shape</button>
+      <button id="figB" style="padding:4px 9px;border-radius:6px;border:1px solid #2a3348;background:#0c0f16;color:var(--ink);font-size:11px;cursor:pointer" title="Load figure B — an image DRAWN TO THE TILE SHAPE (not a random photo). It fills the alternate cells, Angel-&-Devil style. Tip: hit ‘⬇ tile shape’ first to get the silhouette to paint into. A transparent-background PNG is best (or turn on ‘knock out background’).">＋ 2nd figure (B)…</button>
       <button id="figClearB" style="display:none;padding:4px 9px;border-radius:6px;border:1px solid #2a3348;background:#0c0f16;color:var(--muted);font-size:11px;cursor:pointer" title="Remove the 2nd figure">✕ remove B</button>
     </div>
-    <div class="hint" style="font-size:10px;margin-top:2px"><b>Angel-&amp;-Devil style:</b> one tile shape, two fillings. Set your main image, then load (or <b>Shift-drop</b>) a 2nd image — it fills the alternate (rotated/reflected) cells.</div>
+    <div class="hint" style="font-size:10px;margin-top:2px"><b>Angel-&amp;-Devil style:</b> one tile shape, two fillings.
+      <b>What image?</b> Not a random photo — a figure <b>drawn to fill the tile shape</b>. Easiest: hit <b>⬇ tile shape</b>, paint your creature inside that outline, then load one version as the main <b>image</b> (set A) and another as <b>2nd figure (B)</b> (the alternate cells). Transparent PNG is best; a white background works if you enable <b>knock out background</b>. You can also <b>Shift-drop</b> a file to set B.</div>
     <label class="chk" style="margin-top:10px"><input type="checkbox" id="splitOn"> ✂ Split tile into two <b>different shapes</b></label>
     <div id="splitCtl" style="display:none">
       <div class="row"><label>cut from</label><input type="range" id="cutA" min="0" max="1" step="0.01" value="0"></div>
@@ -1311,12 +1314,14 @@ function drawHandles(S){
   // every draggable control point (every edge is editable now)
   const COLOR={master:'#ffffff', self:'#ffd166', selfMirror:'#ffd166', slave:'#9fd0ff'};
   const hs=getHandles();
-  // tilt (tangent) handles first: a thin line from the point to a small ring
+  // CURVE (tangent) handles: a short PINK line from THIS dot to a small ring — drag to bend the edge.
+  // Each handle emanates from its OWN displayed dot (h.base), so mirror/slave handles no longer draw
+  // a line clear across the tile (that was the long criss-crossing).
   for(const h of hs){ if(h.kind!=='tangent') continue;
-    const tp=M.apply(S,h.disp), pp=M.apply(S, edgePts[h.owner][h.idx]);
-    ctx.strokeStyle='rgba(120,230,170,.8)'; ctx.lineWidth=1.5;
+    const tp=M.apply(S,h.disp), pp=M.apply(S, h.base||edgePts[h.owner][h.idx]);
+    ctx.strokeStyle='rgba(255,93,177,.85)'; ctx.lineWidth=1.2;
     ctx.beginPath(); ctx.moveTo(pp.x,pp.y); ctx.lineTo(tp.x,tp.y); ctx.stroke();
-    ctx.beginPath(); ctx.arc(tp.x,tp.y,4.5,0,7); ctx.fillStyle='#1c2b22'; ctx.strokeStyle='#5fe39a'; ctx.lineWidth=2; ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(tp.x,tp.y,4,0,7); ctx.fillStyle='#3a1226'; ctx.strokeStyle='#ff5db1'; ctx.lineWidth=1.8; ctx.fill(); ctx.stroke();
   }
   for(const h of hs){ if(h.kind==='tangent') continue;
     const p=M.apply(S,h.disp);
@@ -1337,7 +1342,7 @@ function tanOf(i,idx){ const p=edgePts[i][idx]; if(p.tx!=null) return {x:p.tx,y:
 function tanDisp(i,idx){ const p=edgePts[i][idx], t=tanOf(i,idx); const L=Math.hypot(t.x,t.y);
   let ux,uy; if(L<1e-4){ const pts=edgeDisplayPtsOf(pat,edgePts,i),k=idx+1,a=pts[k-1],b=pts[k+1]||pts[k],dx=b.x-a.x,dy=b.y-a.y,dl=Math.hypot(dx,dy)||1; ux=dx/dl;uy=dy/dl; }
   else { ux=t.x/L; uy=t.y/L; }
-  const dl=Math.max(L,0.14); return {x:p.x+ux*dl, y:p.y+uy*dl}; }
+  const dl=Math.min(Math.max(L,0.09),0.15); return {x:p.x+ux*dl, y:p.y+uy*dl}; }  // clamp so handles are short, not tile-spanning
 function getHandles(){
   const hs=[]; const n=pat.n; const showTan=document.getElementById('showHandles') && document.getElementById('showHandles').checked;
   for(let i=0;i<n;i++){
@@ -1345,7 +1350,7 @@ function getHandles(){
     if(role==='master'){
       edgePts[i].forEach((p,idx)=>{ hs.push({disp:p, owner:i, idx, kind:'master', corner:!!p.corner,
         toStore:lp=>({x:lp.x,y:lp.y})});
-        if(showTan && !p.corner) hs.push({disp:tanDisp(i,idx), owner:i, idx, kind:'tangent', tan:true}); });
+        if(showTan && !p.corner) hs.push({disp:tanDisp(i,idx), owner:i, idx, kind:'tangent', tan:true, base:{x:p.x,y:p.y}}); });
     } else if(role==='self'){
       const Mc=mid(ci,ci1);
       const toFirstHalf=lp=> (paramOnEdge(i,lp)<=0.5? {x:lp.x,y:lp.y} : {x:2*Mc.x-lp.x,y:2*Mc.y-lp.y});
@@ -1353,14 +1358,14 @@ function getHandles(){
         hs.push({disp:p, owner:i, idx, kind:'self', corner:!!p.corner, toStore:toFirstHalf});
         hs.push({disp:{x:2*Mc.x-p.x,y:2*Mc.y-p.y}, owner:i, idx, kind:'selfMirror', corner:!!p.corner, toStore:toFirstHalf});
         if(showTan && !p.corner){ const td=tanDisp(i,idx);
-          hs.push({disp:td, owner:i, idx, kind:'tangent', tan:true});
-          hs.push({disp:{x:2*Mc.x-td.x, y:2*Mc.y-td.y}, owner:i, idx, kind:'tangent', tan:true, mirrorMc:Mc}); }   // curve handle on the MIRROR half too
+          hs.push({disp:td, owner:i, idx, kind:'tangent', tan:true, base:{x:p.x,y:p.y}});
+          hs.push({disp:{x:2*Mc.x-td.x, y:2*Mc.y-td.y}, owner:i, idx, kind:'tangent', tan:true, mirrorMc:Mc, base:{x:2*Mc.x-p.x, y:2*Mc.y-p.y}}); }   // mirror curve handle emanates from the MIRROR dot
       });
     } else { // slave — handles map back to the master via the inverse transform (curve handles too, so BOTH sides pull)
       const pr=pat.pairings.find(p=>p.s===i), j=pr.m, g=pr.g, gi=M.inv(g);
       edgePts[j].forEach((p,idx)=>{ hs.push({disp:M.apply(g,p), owner:j, idx, kind:'slave', corner:!!p.corner,
         toStore:lp=>M.apply(gi,lp)});
-        if(showTan && !p.corner) hs.push({disp:M.apply(g, tanDisp(j,idx)), owner:j, idx, kind:'tangent', tan:true, slaveGi:gi}); });
+        if(showTan && !p.corner) hs.push({disp:M.apply(g, tanDisp(j,idx)), owner:j, idx, kind:'tangent', tan:true, slaveGi:gi, base:M.apply(g,{x:p.x,y:p.y})}); });
     }
   }
   return hs;
@@ -3513,15 +3518,23 @@ document.getElementById('aiImport').addEventListener('click',()=>{
   inp.click();
 });
 (function(){
-  const bBtn=document.getElementById('figB'), clr=document.getElementById('figClearB');
+  const bBtn=document.getElementById('figB'), clr=document.getElementById('figClearB'), expBtn=document.getElementById('expTile');
   const refresh=()=>{ if(clr) clr.style.display = texImageB ? '' : 'none'; };
+  // heuristic: is this image a solid rectangular photo (every corner fully opaque)? → warn it'll be clipped
+  const looksOpaque=(img)=>{ try{ const c=document.createElement('canvas'); c.width=c.height=16; const g=c.getContext('2d');
+    g.drawImage(img,0,0,16,16); const d=g.getImageData(0,0,16,16).data;
+    const pts=[0,15,240,255].map(i=>d[i*4+3]); return pts.every(a=>a>250); }catch(e){ return false; } };
+  if(expBtn) expBtn.addEventListener('click',()=>{ const a=document.createElement('a'); a.download='tile-shape.png'; a.href=buildShapePNG(); a.click(); });
   if(bBtn) bBtn.addEventListener('click',()=>{
     const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
     inp.onchange=()=>{ const f=inp.files[0]; if(!f) return; pushUndo(); const r=new FileReader();
       r.onload=()=>loadTexBFromURL(r.result,()=>{
         const tt=document.getElementById('twoTone'); if(tt) tt.checked=true;
         buildProcessedTex(); draw(); refresh();
-        dropToast('✓ Figure B set — fills the alternate cells. ⌘Z to undo.');
+        const bw=document.getElementById('blendWhite');
+        if(texImageB && looksOpaque(texImageB) && !(bw&&bw.checked))
+          dropToast('⚠ That image has no transparent background, so it’s clipped to the tile shape. For a clean figure use a transparent PNG, or turn on “knock out background”. ⌘Z to undo.', false);
+        else dropToast('✓ Figure B set — fills the alternate cells. ⌘Z to undo.');
       }); r.readAsDataURL(f); };
     inp.click();
   });
@@ -3865,7 +3878,7 @@ applyTooltips();
 try{ new MutationObserver(()=>applyTooltips()).observe(document.body,{childList:true,subtree:true}); }catch(e){}
 
 /* boot */
-const APP_VERSION = 'build 72 (2026-07-26)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 73 (2026-07-26)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
