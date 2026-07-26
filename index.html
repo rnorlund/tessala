@@ -229,12 +229,13 @@
   <div class="group">
     <div class="lbl">Colors</div>
     <div class="swatches">
-      <div class="sw"><input type="color" id="colA" value="#e3b23c"><span>Fill A</span></div>
-      <div class="sw"><input type="color" id="colB" value="#7c4dcc"><span>Fill B</span></div>
-      <div class="sw"><input type="color" id="colOutline" value="#1c1f26"><span>Outline</span></div>
-      <div class="sw"><input type="color" id="colPen" value="#1c1f26"><span>Pen</span></div>
+      <div class="sw"><input type="color" id="colA" value="#e8734d"><span>Fill A</span></div>
+      <div class="sw"><input type="color" id="colB" value="#1f8a8f"><span>Fill B</span></div>
+      <div class="sw"><input type="color" id="colOutline" value="#20262e"><span>Outline</span></div>
+      <div class="sw"><input type="color" id="colPen" value="#20262e"><span>Pen</span></div>
     </div>
     <label class="chk" style="margin-top:10px"><input type="checkbox" id="twoTone" checked> Alternate two fill colors / figures</label>
+    <label class="chk" style="margin-top:6px"><input type="checkbox" id="shade" checked> Shaded fills (soft gradient — richer look)</label>
     <div class="row" style="margin-top:4px;gap:6px">
       <button id="figB" style="padding:4px 9px;border-radius:6px;border:1px solid #2a3348;background:#0c0f16;color:var(--ink);font-size:11px;cursor:pointer" title="Load a 2nd figure for the alternate cells — Angel-&-Devil style (same tile shape, two fillings)">＋ 2nd figure (B)…</button>
       <button id="figClearB" style="display:none;padding:4px 9px;border-radius:6px;border:1px solid #2a3348;background:#0c0f16;color:var(--muted);font-size:11px;cursor:pointer" title="Remove the 2nd figure">✕ remove B</button>
@@ -997,6 +998,17 @@ function buildOutline(){ return engine==='advanced' ? advOutline() : outlineOf(p
 function mixHex(a,b){const A=parseInt(a.slice(1),16),B=parseInt(b.slice(1),16);
   const r=((A>>16&255)+(B>>16&255))>>1, g=((A>>8&255)+(B>>8&255))>>1, bl=((A&255)+(B&255))>>1;
   return '#'+((1<<24)+(r<<16)+(g<<8)+bl).toString(16).slice(1);}
+function lerpHex(a,b,t){ const A=parseInt(a.slice(1),16),B=parseInt(b.slice(1),16), m=(s)=>Math.max(0,Math.min(255,Math.round(s)));
+  const r=m((A>>16&255)+((B>>16&255)-(A>>16&255))*t), g=m((A>>8&255)+((B>>8&255)-(A>>8&255))*t), bl=m((A&255)+((B&255)-(A&255))*t);
+  return '#'+((1<<24)+(r<<16)+(g<<8)+bl).toString(16).slice(1); }
+// a flat colour, or a soft light→dark diagonal gradient across the tile (the "Shaded fills" look). Cosmetic only.
+function fillStyleFor(scr, hex){
+  const sh=document.getElementById('shade'); if(!sh || !sh.checked) return hex;
+  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9; for(const p of scr){ if(p.x<x0)x0=p.x; if(p.y<y0)y0=p.y; if(p.x>x1)x1=p.x; if(p.y>y1)y1=p.y; }
+  const g=ctx.createLinearGradient(x0,y0,x1,y1);
+  g.addColorStop(0, lerpHex(hex,'#ffffff',0.20)); g.addColorStop(0.55, hex); g.addColorStop(1, lerpHex(hex,'#000000',0.18));
+  return g;
+}
 
 /* ---- enumerate tile instances covering the viewport (flood over group) ---- */
 function instances(W,H){
@@ -1187,7 +1199,7 @@ function draw(){
       drawSubRegion(full, subP.P2, imgB, colB, subP.frameP2);
     } else {
     // backdrop: gap/water colour behind an image fill, else the tile fill colour
-    ctx.fillStyle = (texImage && useTexture) ? gapColorVal() : fill;
+    ctx.fillStyle = (texImage && useTexture) ? gapColorVal() : fillStyleFor(scr, fill);
     pathPoly(ctx,scr); ctx.fill();
 
     // AI image fill, clipped to this tile's exact silhouette. Figure B (if loaded) goes in the alternate cells.
@@ -1599,8 +1611,8 @@ window.addEventListener('keydown',e=>{
 window.addEventListener('keyup',e=>{
   if(e.code==='Space' && _prevTool){ setTool(_prevTool); _prevTool=null; e.preventDefault(); }   // release Space → previous tool
 });
-['colA','colB','colOutline','colPen','twoTone','outW','penW','showHandles','dimOthers','traceImg']
-  .forEach(id=>document.getElementById(id).addEventListener('input',draw));
+['colA','colB','colOutline','colPen','twoTone','outW','penW','showHandles','dimOthers','traceImg','shade']
+  .forEach(id=>{ const el=document.getElementById(id); if(el){ el.addEventListener('input',draw); el.addEventListener('change',draw); } });
 document.getElementById('scale').addEventListener('input',e=>{scale=+e.target.value;draw();});
 document.getElementById('btnReset').addEventListener('click',()=>{pushUndo();resetShape();draw();});
 document.getElementById('btnClearDraw').addEventListener('click',()=>{pushUndo();strokes=[];draw();});
@@ -2162,7 +2174,7 @@ function drawSubRegion(full, poly, img, color, frame){
     const m=M.mul(full,[sz,0,0,sz,fx,fy]), d=DPR;
     ctx.setTransform(d*m[0],d*m[1],d*m[2],d*m[3],d*m[4],d*m[5]);
     ctx.drawImage(img,0,0,1,1); ctx.setTransform(d,0,0,d,0,0);
-  } else { pathPoly(ctx,scr); ctx.fillStyle=color; ctx.fill(); }
+  } else { pathPoly(ctx,scr); ctx.fillStyle=fillStyleFor(scr,color); ctx.fill(); }
   ctx.restore();
 }
 // figure-ground transmutation of ONE sub-region. presence∈[0,1] GROWS the shape about its centre (Escher growth):
@@ -2177,7 +2189,7 @@ function drawTransRegion(full, poly, img, color, frame, presence, dim){
   ctx.save(); pathPoly(ctx,scr); ctx.clip(); ctx.globalAlpha = dim?0.4:1;
   if(img){ const fr=computeTexFrame(P); const m=M.mul(full,[fr.w,0,0,fr.h,fr.x,fr.y]), d=DPR;
     ctx.setTransform(d*m[0],d*m[1],d*m[2],d*m[3],d*m[4],d*m[5]); ctx.drawImage(img,0,0,1,1); ctx.setTransform(d,0,0,d,0,0);
-  } else { pathPoly(ctx,scr); ctx.fillStyle=color; ctx.fill(); }
+  } else { pathPoly(ctx,scr); ctx.fillStyle=fillStyleFor(scr,color); ctx.fill(); }
   ctx.globalAlpha=1; ctx.restore();
 }
 // draw one figure into a cell for transmutation: alpha (crossfade) + scaleF about the frame centre (growth)
@@ -3723,6 +3735,7 @@ const TOOLTIPS={
   colOutline:"Colour of the black tile outline.",
   colPen:"Colour of the freehand Draw pen.",
   twoTone:"Colour neighbouring tiles with the two fill colours alternately (checkerboard by rotation/reflection).",
+  shade:"Give each tile a soft light→dark gradient instead of a flat colour, for a richer, more dimensional look.",
   outW:"Thickness of the tile outline (0 = no outline).",
   penW:"Thickness of the Draw / pen strokes.",
   showHandles:"Show the draggable edit dots and curve handles on the tile (Shape tool).",
@@ -3827,10 +3840,82 @@ applyTooltips();
 try{ new MutationObserver(()=>applyTooltips()).observe(document.body,{childList:true,subtree:true}); }catch(e){}
 
 /* boot */
-const APP_VERSION = 'build 70 (2026-07-26)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 71 (2026-07-26)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
+
+/* ===== Welcome splash + guided demo tour ===== */
+(function(){
+  const css=`
+  #splash{position:fixed;inset:0;z-index:10000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
+    background:linear-gradient(135deg,#e8734d 0%,#c94f6d 45%,#1f8a8f 100%);color:#fff;transition:opacity .6s ease;text-align:center;
+    font-family:system-ui,-apple-system,sans-serif;cursor:pointer}
+  #splash h1{font-size:min(16vw,88px);margin:0;letter-spacing:3px;font-weight:800;text-shadow:0 6px 34px rgba(0,0,0,.28)}
+  #splash p{font-size:17px;opacity:.93;margin:0 0 10px;font-weight:500}
+  #splash .sbtns{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+  #splash button{font:600 15px system-ui;padding:12px 24px;border-radius:12px;cursor:pointer;transition:transform .12s}
+  #splash button:hover{transform:translateY(-2px)}
+  #splash .go{background:#fff;color:#c94f6d;border:0} #splash .tour{background:rgba(255,255,255,.16);color:#fff;border:1px solid rgba(255,255,255,.55)}
+  #splash.hide{opacity:0;pointer-events:none}
+  #tourHole{position:fixed;z-index:9998;border-radius:12px;box-shadow:0 0 0 9999px rgba(10,12,18,.70);transition:all .28s ease;pointer-events:none}
+  #tourBox{position:fixed;z-index:9999;max-width:300px;background:#141b2b;color:#eaf1ff;border:1px solid #3a6ea5;border-radius:12px;
+    padding:14px 16px;box-shadow:0 12px 44px rgba(0,0,0,.55);font:14px/1.45 system-ui}
+  #tourBox h4{margin:2px 0 6px;font-size:15px;color:#8ecbff} #tourBox .step{font-size:11px;color:#9aa3b2;letter-spacing:.5px}
+  #tourBox .trow{display:flex;justify-content:space-between;align-items:center;margin-top:12px;gap:8px}
+  #tourBox button{font:600 13px system-ui;padding:7px 15px;border-radius:8px;border:0;cursor:pointer;background:#3a6ea5;color:#fff}
+  #tourBox .skip{background:transparent;color:#9aa3b2;padding:7px 4px}`;
+  const st=document.createElement('style'); st.textContent=css; document.head.appendChild(st);
+
+  // guided tour
+  const TOUR=[
+    {sel:'#patGrid',   t:'Pick a base tiling', x:'Choose how tiles repeat. Glide = clean offset rows; rot3/rot4 spin into pinwheels; hexagon & square are the classics.'},
+    {sel:'#cv',        t:'Sculpt the tile',    x:'With the Shape tool, drag the dots on the centre tile to morph it into a creature — the whole pattern updates live and always stays gap-free.'},
+    {sel:'#curveMain', t:'Smooth or sharpen',  x:'Slide to make the edges rounder or more angular.'},
+    {sel:'.swatches',  t:'Colour it',          x:'Set your two fill colours. “Shaded fills” adds a soft gradient for a richer look.'},
+    {sel:'#splitOn',   t:'Two shapes in one',  x:'Split cuts each tile into two different interlocking shapes — the trick behind two-creature (Angel-&-Devil) designs.'},
+    {sel:'#btnAI',     t:'Let AI draw it',     x:'Prefer a real creature? Generate one and let it fill the tile automatically (your key, or a local model).'},
+    {sel:'#btnPng',    t:'Export & save',      x:'Download your tessellation as a PNG, or Save the design to reopen later. That’s the whole loop — enjoy!'}
+  ];
+  let i=0;
+  function end(){ ['tourHole','tourBox'].forEach(id=>{const e=document.getElementById(id); if(e) e.remove();}); }
+  function show(){
+    const s=TOUR[i], el=document.querySelector(s.sel);
+    if(!el){ if(i<TOUR.length-1){ i++; return show(); } return end(); }
+    let hole=document.getElementById('tourHole'), box=document.getElementById('tourBox');
+    if(!hole){ hole=document.createElement('div'); hole.id='tourHole'; document.body.appendChild(hole); }
+    if(!box){ box=document.createElement('div'); box.id='tourBox'; document.body.appendChild(box); }
+    try{ el.scrollIntoView({block:'nearest',inline:'nearest'}); }catch(e){}
+    const r=el.getBoundingClientRect(), pad=8;
+    hole.style.left=(r.left-pad)+'px'; hole.style.top=(r.top-pad)+'px'; hole.style.width=(r.width+pad*2)+'px'; hole.style.height=(r.height+pad*2)+'px';
+    const last=i===TOUR.length-1;
+    box.innerHTML='<div class="step">STEP '+(i+1)+' / '+TOUR.length+'</div><h4>'+s.t+'</h4><div>'+s.x+'</div>'+
+      '<div class="trow"><button class="skip">Skip tour</button><button class="next">'+(last?'Done ✓':'Next →')+'</button></div>';
+    let bx=Math.min(Math.max(8,r.left), window.innerWidth-310), by=r.bottom+14;
+    if(by+170>window.innerHeight) by=Math.max(8, r.top-172);
+    box.style.left=bx+'px'; box.style.top=by+'px';
+    box.querySelector('.next').onclick=()=>{ if(last) end(); else { i++; show(); } };
+    box.querySelector('.skip').onclick=end;
+  }
+  window.startTour=function(){ end(); i=0; show(); };
+
+  // Demo button in the top bar
+  const tb=document.getElementById('topbar');
+  if(tb){ const b=document.createElement('div'); b.className='pill ptog'; b.id='demoBtn'; b.textContent='❓ Demo';
+    b.title='Take a quick guided tour of how to use Tessala'; b.style.cursor='pointer';
+    b.addEventListener('click',window.startTour); tb.insertBefore(b, document.getElementById('verPill')); }
+
+  // welcome splash (fades on click or after a moment)
+  const sp=document.createElement('div'); sp.id='splash';
+  sp.innerHTML='<h1>Tessala</h1><p>Design your own Escher-style tessellations</p>'+
+    '<div class="sbtns"><button class="go">Start creating</button><button class="tour">✦ Take the 60-sec tour</button></div>';
+  document.body.appendChild(sp);
+  const hideSplash=()=>{ sp.classList.add('hide'); setTimeout(()=>{ if(sp.parentNode) sp.remove(); }, 700); };
+  sp.querySelector('.go').addEventListener('click',e=>{ e.stopPropagation(); hideSplash(); });
+  sp.querySelector('.tour').addEventListener('click',e=>{ e.stopPropagation(); hideSplash(); setTimeout(window.startTour,450); });
+  sp.addEventListener('click',hideSplash);
+  setTimeout(()=>{ if(document.getElementById('splash')) hideSplash(); }, 3400);
+})();
 </script>
 </body>
 </html>
