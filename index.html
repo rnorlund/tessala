@@ -3829,18 +3829,43 @@ const TPLTIP={
   Fish:"A fish-like interlocking profile to start from.",
   Claw:"A clawed / hooked profile to start from."
 };
+const LABELTIP={   // extra tooltips for label rows / headers that have no id'd control to inherit from
+  "Tessala":"Tessala — an Escher-style tessellation studio. Sculpt one tile; it repeats to fill the plane."
+};
 function applyTooltips(){
   for(const id in TOOLTIPS){ const el=document.getElementById(id); if(el && !el.title) el.title=TOOLTIPS[id]; }
   document.querySelectorAll('.pat[data-type]').forEach(el=>{ if(!el.title && PATTIP[el.dataset.type]) el.title=PATTIP[el.dataset.type]; });
   document.querySelectorAll('[data-tpl]').forEach(el=>{ if(!el.title) el.title=TPLTIP[el.dataset.tpl]||('Starter shape: '+el.dataset.tpl); });
   document.querySelectorAll('#advCtl input[type=range]').forEach(el=>{ if(!el.title) el.title="Adjust this tiling type’s geometry (changes the tile’s proportions while staying a valid tiling)."; });
   document.querySelectorAll('#symGrid .symCell, #symGrid > div').forEach(el=>{ if(!el.title) el.title="Pick this isohedral tiling type."; });
+  // A label row is what the user actually hovers — inherit the tooltip from the control it wraps
+  // (input/select/textarea whose id is in TOOLTIPS, or that already carries a title).
+  const ctlTip=ctl=>ctl && (ctl.title || (ctl.id && TOOLTIPS[ctl.id]));
+  document.querySelectorAll('#side label, #sideR label').forEach(lab=>{
+    if(lab.title) return;
+    let ctl=lab.querySelector('input,select,textarea');                     // label wraps the control
+    if(!ctl){ const row=lab.closest('.row'); if(row) ctl=row.querySelector('input,select,textarea'); } // label is a sibling in a .row
+    if(!ctl && lab.htmlFor) ctl=document.getElementById(lab.htmlFor);        // label[for=…]
+    let tip = ctlTip(ctl);
+    if(!tip){ const key=(lab.textContent||'').trim(); tip=LABELTIP[key]; }
+    if(tip) lab.title=tip;
+  });
+  // Title the whole .row so hovering anywhere on the strip (label, gap, or slider) shows the hint
+  document.querySelectorAll('#side .row, #sideR .row').forEach(row=>{
+    if(row.title) return; const tip=ctlTip(row.querySelector('input,select,textarea')); if(tip) row.title=tip;
+  });
+  // Section headers / any remaining labelled text in the two panels
+  for(const key in LABELTIP){
+    document.querySelectorAll('#side *, #sideR *').forEach(el=>{
+      if(!el.title && !el.children.length && (el.textContent||'').trim()===key) el.title=LABELTIP[key];
+    });
+  }
 }
 applyTooltips();
 try{ new MutationObserver(()=>applyTooltips()).observe(document.body,{childList:true,subtree:true}); }catch(e){}
 
 /* boot */
-const APP_VERSION = 'build 71 (2026-07-26)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 72 (2026-07-26)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
