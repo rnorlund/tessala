@@ -1062,6 +1062,8 @@ function renderToDataURL(scale){
   const Wlog=oldW/oldDPR, Hlog=oldH/oldDPR;
   DPR = oldDPR*scale;
   cv.width = Math.round(Wlog*DPR); cv.height = Math.round(Hlog*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);   // resizing the canvas resets the transform to identity — re-apply DPR
+                                       // so the export fills the whole hi-res buffer (not just the top-left 1/scale). (B5)
   draw();
   const url = cv.toDataURL('image/png');
   DPR = oldDPR; cv.width = oldW; cv.height = oldH;
@@ -3878,7 +3880,7 @@ applyTooltips();
 try{ new MutationObserver(()=>applyTooltips()).observe(document.body,{childList:true,subtree:true}); }catch(e){}
 
 /* boot */
-const APP_VERSION = 'build 73 (2026-07-26)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 74 (2026-07-27)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
