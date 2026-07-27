@@ -237,6 +237,7 @@
     </div>
     <label class="chk" style="margin-top:10px"><input type="checkbox" id="twoTone" checked> Alternate two fill colors / figures</label>
     <label class="chk" style="margin-top:6px"><input type="checkbox" id="shade" checked> Shaded fills (soft gradient — richer look)</label>
+    <label class="chk" style="margin-top:6px"><input type="checkbox" id="weaveCross"> 🧶 Weave self-crossing tiles (interlace look)</label>
     <div class="row" style="margin-top:4px;gap:6px;flex-wrap:wrap">
       <button id="expTile" style="padding:4px 9px;border-radius:6px;border:1px solid #2a3348;background:#0c0f16;color:var(--ink);font-size:11px;cursor:pointer" title="Download the tile's silhouette as a transparent PNG. Paint your figure inside that outline, then load it back as the main image (A) or as the 2nd figure (B).">⬇ tile shape</button>
       <button id="figB" style="padding:4px 9px;border-radius:6px;border:1px solid #2a3348;background:#0c0f16;color:var(--ink);font-size:11px;cursor:pointer" title="Load figure B — an image DRAWN TO THE TILE SHAPE (not a random photo). It fills the alternate cells, Angel-&-Devil style. Tip: hit ‘⬇ tile shape’ first to get the silhouette to paint into. A transparent-background PNG is best (or turn on ‘knock out background’).">＋ 2nd figure (B)…</button>
@@ -1087,8 +1088,10 @@ function draw(){
   const baseCen=centroid(outline);
   // real-time self-crossing check (simple engine): a self-intersecting tile still "tiles" but looks uneven,
   // so flag it — every tile's outline goes red and a warning shows until the user pulls the point back.
+  const weave = document.getElementById('weaveCross') && document.getElementById('weaveCross').checked;
   const selfX = engine!=='advanced' && !simple(outline);
-  toggleSelfXWarn(selfX);
+  const weaving = selfX && weave;               // render a crossing as intentional interlacing, not an error
+  toggleSelfXWarn(selfX && !weave);             // only warn when the crossing is NOT intentional
   const S=screenMat(W,H);
   const insts=instances(W,H);
   const subP = splitOn ? buildSubOutlines() : null;   // two sub-tiles when split mode is on
@@ -1209,7 +1212,9 @@ function draw(){
     } else {
     // backdrop: gap/water colour behind an image fill, else the tile fill colour
     ctx.fillStyle = (texImage && useTexture) ? gapColorVal() : fillStyleFor(scr, fill);
-    pathPoly(ctx,scr); ctx.fill();
+    pathPoly(ctx,scr);
+    if(weaving){ const a=ctx.globalAlpha; ctx.globalAlpha=a*0.82; ctx.fill('evenodd'); ctx.globalAlpha=a; }  // even-odd → the crossing reads as a clean loop; slight translucency → overlaps look woven
+    else ctx.fill();
 
     // AI image fill, clipped to this tile's exact silhouette. Figure B (if loaded) goes in the alternate cells.
     if(texImage && useTexture && texFrame){
@@ -1244,9 +1249,12 @@ function draw(){
       }
       ctx.restore();
     }
-    // outline — RED when the tile self-crosses (the tiling won't line up cleanly); else the chosen colour.
-    // Forced on when self-crossing even if outline width is 0, so the problem is always visible.
-    if(!transOn && (selfX || outW>0)){ ctx.strokeStyle = selfX ? '#ff3b30' : colOut; ctx.lineWidth = selfX ? Math.max(outW,2.5) : outW;
+    // outline — RED warning when the tile self-crosses UNINTENTIONALLY (helps you pull the point back).
+    // When "Weave" is on the crossing is intentional: draw a normal, always-visible outline so the interlace reads.
+    const warnRed = selfX && !weave;
+    if(!transOn && (warnRed || outW>0 || weaving)){
+      ctx.strokeStyle = warnRed ? '#ff3b30' : colOut;
+      ctx.lineWidth = warnRed ? Math.max(outW,2.5) : (weaving ? Math.max(outW,1.5) : outW);
       ctx.lineJoin='round'; pathPoly(ctx,scr); ctx.stroke(); }
     ctx.globalAlpha=1;
   }
@@ -1623,7 +1631,7 @@ window.addEventListener('keydown',e=>{
 window.addEventListener('keyup',e=>{
   if(e.code==='Space' && _prevTool){ setTool(_prevTool); _prevTool=null; e.preventDefault(); }   // release Space → previous tool
 });
-['colA','colB','colOutline','colPen','twoTone','outW','penW','showHandles','dimOthers','traceImg','shade']
+['colA','colB','colOutline','colPen','twoTone','outW','penW','showHandles','dimOthers','traceImg','shade','weaveCross']
   .forEach(id=>{ const el=document.getElementById(id); if(el){ el.addEventListener('input',draw); el.addEventListener('change',draw); } });
 document.getElementById('scale').addEventListener('input',e=>{scale=+e.target.value;draw();});
 document.getElementById('btnReset').addEventListener('click',()=>{pushUndo();resetShape();draw();});
@@ -3769,6 +3777,7 @@ const TOOLTIPS={
   colPen:"Colour of the freehand Draw pen.",
   twoTone:"Colour neighbouring tiles with the two fill colours alternately (checkerboard by rotation/reflection).",
   shade:"Give each tile a soft light→dark gradient instead of a flat colour, for a richer, more dimensional look.",
+  weaveCross:"When a tile crosses itself (which can't tile perfectly gap-free), render it as an intentional woven/interlaced overlap instead of showing the red ‘uneven’ warning. Even-odd fill + slight translucency make the crossing look deliberate.",
   outW:"Thickness of the tile outline (0 = no outline).",
   penW:"Thickness of the Draw / pen strokes.",
   showHandles:"Show the draggable edit dots and curve handles on the tile (Shape tool).",
@@ -3898,7 +3907,7 @@ applyTooltips();
 try{ new MutationObserver(()=>applyTooltips()).observe(document.body,{childList:true,subtree:true}); }catch(e){}
 
 /* boot */
-const APP_VERSION = 'build 75 (2026-07-27)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 76 (2026-07-27)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
