@@ -238,6 +238,18 @@
     <label class="chk" style="margin-top:10px"><input type="checkbox" id="twoTone" checked> Alternate two fill colors / figures</label>
     <label class="chk" style="margin-top:6px"><input type="checkbox" id="shade" checked> Shaded fills (soft gradient — richer look)</label>
     <label class="chk" style="margin-top:6px"><input type="checkbox" id="weaveCross"> 🧶 Weave self-crossing tiles (interlace look)</label>
+    <div id="weaveCtl" style="display:none">
+      <div class="row"><label>weave opacity</label><input type="range" id="weaveOpacity" min="0.2" max="1" step="0.02" value="0.82"></div>
+      <div class="row"><label>overlap blend</label><select id="weaveBlend" class="tbsel">
+        <option value="source-over">normal (layer)</option>
+        <option value="multiply">multiply — darker</option>
+        <option value="screen">screen — lighter</option>
+        <option value="overlay">overlay — contrast</option>
+        <option value="darken">darken</option>
+        <option value="lighten">lighten</option>
+        <option value="difference">difference — psychedelic</option>
+      </select></div>
+    </div>
     <div class="row" style="margin-top:4px;gap:6px;flex-wrap:wrap">
       <button id="expTile" style="padding:4px 9px;border-radius:6px;border:1px solid #2a3348;background:#0c0f16;color:var(--ink);font-size:11px;cursor:pointer" title="Download the tile's silhouette as a transparent PNG. Paint your figure inside that outline, then load it back as the main image (A) or as the 2nd figure (B).">⬇ tile shape</button>
       <button id="figB" style="padding:4px 9px;border-radius:6px;border:1px solid #2a3348;background:#0c0f16;color:var(--ink);font-size:11px;cursor:pointer" title="Load figure B — an image DRAWN TO THE TILE SHAPE (not a random photo). It fills the alternate cells, Angel-&-Devil style. Tip: hit ‘⬇ tile shape’ first to get the silhouette to paint into. A transparent-background PNG is best (or turn on ‘knock out background’).">＋ 2nd figure (B)…</button>
@@ -1092,6 +1104,8 @@ function draw(){
   const selfX = engine!=='advanced' && !simple(outline);
   const weaving = selfX && weave;               // render a crossing as intentional interlacing, not an error
   toggleSelfXWarn(selfX && !weave);             // only warn when the crossing is NOT intentional
+  const weaveAlpha = parseFloat((document.getElementById('weaveOpacity')||{}).value) || 0.82;   // user-adjustable weave translucency
+  const weaveBlend = (document.getElementById('weaveBlend')||{}).value || 'source-over';         // user-adjustable overlap blend
   const S=screenMat(W,H);
   const insts=instances(W,H);
   const subP = splitOn ? buildSubOutlines() : null;   // two sub-tiles when split mode is on
@@ -1213,7 +1227,8 @@ function draw(){
     // backdrop: gap/water colour behind an image fill, else the tile fill colour
     ctx.fillStyle = (texImage && useTexture) ? gapColorVal() : fillStyleFor(scr, fill);
     pathPoly(ctx,scr);
-    if(weaving){ const a=ctx.globalAlpha; ctx.globalAlpha=a*0.82; ctx.fill('evenodd'); ctx.globalAlpha=a; }  // even-odd → the crossing reads as a clean loop; slight translucency → overlaps look woven
+    if(weaving){ const a=ctx.globalAlpha, op=ctx.globalCompositeOperation; ctx.globalAlpha=a*weaveAlpha; ctx.globalCompositeOperation=weaveBlend;
+      ctx.fill('evenodd'); ctx.globalAlpha=a; ctx.globalCompositeOperation=op; }  // even-odd loop + adjustable translucency + overlap blend mode
     else ctx.fill();
 
     // AI image fill, clipped to this tile's exact silhouette. Figure B (if loaded) goes in the alternate cells.
@@ -1631,8 +1646,12 @@ window.addEventListener('keydown',e=>{
 window.addEventListener('keyup',e=>{
   if(e.code==='Space' && _prevTool){ setTool(_prevTool); _prevTool=null; e.preventDefault(); }   // release Space → previous tool
 });
-['colA','colB','colOutline','colPen','twoTone','outW','penW','showHandles','dimOthers','traceImg','shade','weaveCross']
+['colA','colB','colOutline','colPen','twoTone','outW','penW','showHandles','dimOthers','traceImg','shade','weaveCross','weaveOpacity','weaveBlend']
   .forEach(id=>{ const el=document.getElementById(id); if(el){ el.addEventListener('input',draw); el.addEventListener('change',draw); } });
+// show the weave opacity/blend controls only when Weave is on
+(function(){ const wc=document.getElementById('weaveCross'), wctl=document.getElementById('weaveCtl');
+  const sync=()=>{ if(wctl) wctl.style.display = (wc && wc.checked) ? '' : 'none'; };
+  if(wc) wc.addEventListener('change', sync); sync(); })();
 document.getElementById('scale').addEventListener('input',e=>{scale=+e.target.value;draw();});
 document.getElementById('btnReset').addEventListener('click',()=>{pushUndo();resetShape();draw();});
 document.getElementById('btnClearDraw').addEventListener('click',()=>{pushUndo();strokes=[];draw();});
@@ -3778,6 +3797,8 @@ const TOOLTIPS={
   twoTone:"Colour neighbouring tiles with the two fill colours alternately (checkerboard by rotation/reflection).",
   shade:"Give each tile a soft light→dark gradient instead of a flat colour, for a richer, more dimensional look.",
   weaveCross:"When a tile crosses itself (which can't tile perfectly gap-free), render it as an intentional woven/interlaced overlap instead of showing the red ‘uneven’ warning. Even-odd fill + slight translucency make the crossing look deliberate.",
+  weaveOpacity:"How see-through the woven tiles are. Lower = more translucent, so overlapping lobes blend and the interlacing shows through; higher = more solid.",
+  weaveBlend:"How overlapping woven tiles combine where they cross: normal (top layer wins), multiply (overlaps darken), screen (overlaps lighten), overlay/darken/lighten, or difference (psychedelic inverted overlaps).",
   outW:"Thickness of the tile outline (0 = no outline).",
   penW:"Thickness of the Draw / pen strokes.",
   showHandles:"Show the draggable edit dots and curve handles on the tile (Shape tool).",
@@ -3907,7 +3928,7 @@ applyTooltips();
 try{ new MutationObserver(()=>applyTooltips()).observe(document.body,{childList:true,subtree:true}); }catch(e){}
 
 /* boot */
-const APP_VERSION = 'build 76 (2026-07-27)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 77 (2026-07-27)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
