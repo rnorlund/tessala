@@ -319,6 +319,7 @@
     <button class="act" id="btnSave">Save design</button>
     <button class="act" id="btnLoad">Load design</button>
     <button class="act" id="btnImport" title="Import an existing tessellation image — opens a file picker (or just paste an image with ⌘V/Ctrl+V). Auto-detects the repeating tile and lays it out so you can pan, zoom, and re-export it (and Save it in our format). Note: recolor / shape-editing isn't available for imported raster art.">🔍 Import a tessellation <span style="opacity:.5">(or ⌘V)</span></button>
+    <button class="act primary" id="btnConvertEdit" title="Turn the imported tiling into an EDITABLE tile: a square tile filled with the detected motif (period-aligned so it still tiles seamlessly). Drag the edge dots to carve the interlocking boundary over the art. Best for ~square repeats." style="display:none">✏️ Convert to editable tile</button>
     <button class="act" id="btnExitImport" title="Leave import mode and return to the shape editor" style="display:none">✕ Exit import</button>
     <div id="importStatus" class="hint" style="display:none;margin-top:4px"></div>
   </div>
@@ -757,7 +758,7 @@ function resetSplitCut(){
 }
 function setPattern(type){
   engine='simple';
-  if(importTile){ importTile=null; const b=document.getElementById('btnExitImport'); if(b) b.style.display='none'; const st=document.getElementById('importStatus'); if(st) st.style.display='none'; }
+  if(importTile){ importTile=null; _showImportBtns(false); }
   const adv=document.getElementById('advCtl'); if(adv){ adv.style.display='none'; document.getElementById('btnAdvanced').style.display=''; }
   pat=buildPattern(type);
   resetShape();
@@ -1120,7 +1121,7 @@ function detectPeriod(d, W, Ht){
 }
 function setImportTile(url, PW, PH, cb){
   const im=new Image(); im.onload=()=>{ importTile={img:im, url, PW, PH}; tool='pan';
-    const b=document.getElementById('btnExitImport'); if(b) b.style.display='';
+    _showImportBtns(true);
     if(cb) cb(); draw(); }; im.src=url;
 }
 function importTilingFromURL(url){
@@ -1146,9 +1147,29 @@ function drawImportedWallpaper(){
   for(let x=ox-tw; x<W+tw; x+=tw) for(let y=oy-th; y<Ht+th; y+=th)
     ctx.drawImage(importTile.img, x, y, tw, th);
 }
-function exitImport(){ importTile=null;
-  const b=document.getElementById('btnExitImport'); if(b) b.style.display='none';
-  const st=document.getElementById('importStatus'); if(st) st.style.display='none'; draw(); }
+function _showImportBtns(on){ ['btnExitImport','btnConvertEdit'].forEach(id=>{const b=document.getElementById(id); if(b) b.style.display=on?'':'none';}); if(!on){ const st=document.getElementById('importStatus'); if(st) st.style.display='none'; } }
+function exitImport(){ importTile=null; _showImportBtns(false); draw(); }
+// Convert an imported tiling into an EDITABLE tile: a square tile filled with the detected motif,
+// period-aligned so it still tiles seamlessly. The user drags the edge dots to carve the interlocking
+// boundary over the visible art. (Auto-extracting the exact outline from a raster is a separate hard
+// problem; this makes the import genuinely editable/deformable/saveable in our format.)
+function convertImportToEditable(){
+  if(!importTile) return;
+  const PW=importTile.PW, PH=importTile.PH, url=importTile.url, ratio=PW/PH;
+  if(ratio<0.8 || ratio>1.25){ dropToast('This tiling’s repeat is '+PW+'×'+PH+' — rectangular. Editable conversion currently supports ~square repeats.', false); return; }
+  pushUndo(); importTile=null; _showImportBtns(false);
+  setPattern('sqT'); setShape('Plain');                       // straight square = exactly one period per tile
+  loadTexFromURL(url, ()=>{
+    texFrame={x:-0.5,y:-0.5,w:1,h:1}; texZoom=1; texOffX=0; texOffY=0; useTexture=true;   // map the period exactly onto the unit cell → seamless
+    const au=document.getElementById('aiUse'); if(au) au.checked=true;
+    const sm=document.getElementById('stampMode'); if(sm) sm.checked=false;
+    buildProcessedTex();
+    const sh=document.getElementById('showHandles'); if(sh) sh.checked=true;
+    if(typeof setTool==='function') setTool('shape'); else tool='shape';
+    draw();
+    dropToast('✓ Converted to an EDITABLE tile — drag the edge dots to carve the interlocking boundary; the art shows through and still tiles. ⌘Z to undo.');
+  });
+}
 
 function draw(){
   const W=cv.width/DPR, H=cv.height/DPR;
@@ -1792,6 +1813,7 @@ document.getElementById('btnImport').addEventListener('click',()=>{
   inp.click();
 });
 document.getElementById('btnExitImport').addEventListener('click',exitImport);
+document.getElementById('btnConvertEdit').addEventListener('click',convertImportToEditable);
 // Paste an image (⌘V / Ctrl+V) anywhere → import & auto-detect its tiling (convenient for community pieces).
 window.addEventListener('paste', e=>{
   const ae=document.activeElement; if(ae && (ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.isContentEditable)) return;   // let text fields paste normally
@@ -1905,7 +1927,7 @@ function loadState(s){
   }
   // imported-tessellation layer (re-tiles a detected repeat); overrides the shape engine while active
   if(s.importTile && s.importTileURL){ setImportTile(s.importTileURL, s.importTile.PW, s.importTile.PH); }
-  else { importTile=null; const b=document.getElementById('btnExitImport'); if(b) b.style.display='none'; const st=document.getElementById('importStatus'); if(st) st.style.display='none'; }
+  else { importTile=null; _showImportBtns(false); }
   draw();
 }
 
@@ -4004,7 +4026,7 @@ applyTooltips();
 try{ new MutationObserver(()=>applyTooltips()).observe(document.body,{childList:true,subtree:true}); }catch(e){}
 
 /* boot */
-const APP_VERSION = 'build 79 (2026-07-28)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 80 (2026-07-28)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
