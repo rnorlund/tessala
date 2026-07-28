@@ -47,6 +47,19 @@
   .group.collapsed > .lbl.grpHead{ margin-bottom:0; }
   .group.collapsed > .lbl.grpHead::after{ transform:rotate(-90deg); }
   .group.collapsed > .groupBody{ display:none; }
+  /* floating guided panel shown while tracing */
+  #traceBar{ position:fixed; left:50%; bottom:22px; transform:translateX(-50%); z-index:9996; display:none;
+    background:rgba(20,27,43,.96); border:1px solid #3a6ea5; border-radius:12px; padding:10px 14px;
+    box-shadow:0 10px 40px rgba(0,0,0,.55); font:13px system-ui,sans-serif; color:#eaf1ff; min-width:300px; max-width:min(94vw,470px); }
+  #traceBar .tbTitle{ font-weight:600; display:flex; align-items:center; gap:7px; }
+  #traceBar .tbSw{ width:14px; height:14px; border-radius:3px; border:1px solid rgba(0,0,0,.4); display:inline-block; }
+  #traceBar .tbRow{ display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
+  #traceBar button{ font:600 12.5px system-ui; padding:7px 12px; border-radius:8px; border:0; cursor:pointer; background:#3a6ea5; color:#fff; }
+  #traceBar button.ghost{ background:#26314a; }
+  #traceBar button:hover{ filter:brightness(1.12); }
+  #traceBar .tbHint{ font-size:11px; color:#9aa3b2; margin-top:9px; line-height:1.4; }
+  #traceBar input[type=range]{ width:96px; }
+  #traceBar label{ display:flex; align-items:center; gap:5px; }
   .pat-grid{display:grid; grid-template-columns:1fr 1fr; gap:6px}
   .pat{
     background:var(--panel2); border:1px solid var(--line); border-radius:8px;
@@ -242,13 +255,8 @@
     <button class="act primary" id="btnImport" title="Import an existing tessellation image — opens a file picker (or just paste an image with ⌘V/Ctrl+V). Auto-detects the repeating tile and lays it out so you can pan, zoom, and re-export it (and Save it in our format).">🔍 Import a tessellation image <span style="opacity:.5">(or ⌘V)</span></button>
     <button class="act primary" id="btnConvertEdit" title="Turn the imported tiling into an EDITABLE tile — sets up a square tile filled with the detected motif so you can drag the edges to carve the shape over the visible art. NOTE: it does not yet auto-trace the interlocking creature outline (that's in progress for 2-colour / clearly-outlined tilings)." style="display:none">✏️ Convert to editable tile</button>
     <button class="act" id="btnImpView" title="Toggle between the original image (best for tracing — no re-tiling seams) and the tiled reproduction (only clean on pixel-perfect digital tilings)." style="display:none">🔲 Show tiled</button>
-    <button class="act primary" id="btnTrace" title="TRACE the actual creature outlines: Shift-click rough key points around each shape — they snap to the crisp edges — drag to refine, double-click a dot for sharp/smooth. Press N for the next creature in a new colour." style="display:none">🖊 Trace the shapes</button>
-    <button class="act" id="btnTraceNew" title="Finish this shape and start the next creature in a new colour (shortcut: N)" style="display:none">＋ Next creature (N)</button>
-    <button class="act" id="btnTraceDone" title="Finish tracing (Esc)" style="display:none">✓ Done tracing</button>
-    <div id="traceCtl" style="display:none">
-      <label class="chk" style="margin-top:4px"><input type="checkbox" id="traceSnap"> 🧲 Snap points to nearest edge (off = place exactly where you click)</label>
-      <div class="row"><label>curve (smooth pts)</label><input type="range" id="traceCurve" min="0" max="1" step="0.05" value="0.85"></div>
-    </div>
+    <button class="act primary" id="btnTrace" title="TRACE the actual creature outlines: a guided panel opens. Shift-click key points around each shape, drag dots to refine, double-click for sharp/smooth. Press N for the next creature." style="display:none">🖊 Trace the shapes</button>
+    <button class="act primary" id="btnAssemble" title="Tile your traced shapes into a repeating pattern (auto-detects the repeat and lays copies down). Click again to go back to editing the shapes." style="display:none">🧩 Tile the shapes into a pattern</button>
     <button class="act" id="btnExitImport" title="Leave import mode and return to the shape editor" style="display:none">✕ Exit import</button>
     <div id="importStatus" class="hint" style="display:none;margin-top:4px"></div>
   </div>
@@ -360,6 +368,20 @@
     <button class="act" id="btnSave">Save design</button>
   </div>
 </aside>
+
+<div id="traceBar">
+  <div class="tbTitle">🖊 Tracing <span class="tbSw" id="tbSw"></span> <span id="tbShape">creature 1</span><span id="tbCount" style="color:#9aa3b2"> · 0 pts</span></div>
+  <div class="tbRow">
+    <button class="ghost" id="tbUndo" title="Undo the last point (⌘Z also works)">↶ Undo point</button>
+    <button id="tbNext" title="Finish this creature and start the next one in a new colour (N)">✓ Finish · next creature</button>
+    <button class="ghost" id="tbDone" title="Finish tracing (Esc)">Done</button>
+  </div>
+  <div class="tbRow">
+    <label title="Off = points land exactly where you click. On = each point snaps to the nearest crisp edge."><input type="checkbox" id="traceSnap"> 🧲 Snap to edges</label>
+    <span style="margin-left:6px">curve</span><input type="range" id="traceCurve" min="0" max="1" step="0.05" value="0.85" title="Curvature of the smooth (◯) points: 0 = angular, 1 = fully rounded. Corner (◻) points stay sharp.">
+  </div>
+  <div class="tbHint"><b>Shift-click</b> = add point · <b>drag</b> a dot = move · <b>double-click</b> a dot = ◻ sharp / ◯ smooth · <b>right-click</b> = delete · click the <b>white dot</b> to close · <b>Space-drag</b> or scroll = pan / zoom</div>
+</div>
 
 <style>
   #aiWiz{min-height:340px}
@@ -1189,6 +1211,7 @@ function traceW2S(wx,wy){ const W=cv.width/DPR,H=cv.height/DPR,k=scale/110,d=imp
 function traceS2W(sx,sy){ const W=cv.width/DPR,H=cv.height/DPR,k=scale/110,d=impDims(); return {x:(sx-W/2-pan.x)/k+d.W/2, y:(sy-H/2-pan.y)/k+d.H/2}; }
 function drawImportedView(){
   if(!importTile) return; const W=cv.width/DPR, Ht=cv.height/DPR, k=scale/110, d=impDims(); const iw=d.W*k, ih=d.H*k; if(iw<2||ih<2) return;
+  if(traceTiled){ ctx.fillStyle='#f4efe6'; ctx.fillRect(0,0,W,Ht); drawTraceOverlay(); return; }   // clean assembled-pattern view (traced shapes only)
   if(importView==='original'){ const s=traceW2S(0,0); ctx.drawImage(impImg(), s.x, s.y, iw, ih); }
   else { const PW=importTile.PW, PH=importTile.PH, tw=PW*k, th=PH*k; const w0=traceS2W(0,0), w1=traceS2W(W,Ht);
     const i0=Math.floor(w0.x/PW)-1,i1=Math.ceil(w1.x/PW)+1,j0=Math.floor(w0.y/PH)-1,j1=Math.ceil(w1.y/PH)+1;
@@ -1198,7 +1221,42 @@ function drawImportedView(){
 
 /* ===== Guided tracer: click rough key points around a creature; each snaps to the crisp edge; smooth closed curve;
    press N for the next creature in a new colour; drag dots to adjust. Isolated over the imported wallpaper. ===== */
-let traceMode=false, traceShapes=[], traceActive=-1, traceDrag=null, traceGrad=null, traceGW=0, traceGH=0, _spacePan=false;
+let traceMode=false, traceShapes=[], traceActive=-1, traceDrag=null, traceGrad=null, traceGW=0, traceGH=0, _spacePan=false, traceTiled=false;
+// find the two fundamental translation vectors of the image (2D autocorrelation) — used to tile the traced shapes
+function computeLattice2D(src){
+  const OW=src.width||src.naturalWidth, OH=src.height||src.naturalHeight; if(!OW) return null;
+  const sd=Math.min(1, 220/Math.max(OW,OH)), W=Math.round(OW*sd), H=Math.round(OH*sd);   // coarse pass on a downscaled copy (fast)
+  const c=document.createElement('canvas'); c.width=W; c.height=H; c.getContext('2d').drawImage(src,0,0,W,H);
+  const d=c.getContext('2d').getImageData(0,0,W,H).data;
+  const sad=(dx,dy)=>{ let s=0,n=0; const x0=Math.max(2,-dx),x1=Math.min(W-2,W-dx),y0=Math.max(2,-dy),y1=Math.min(H-2,H-dy);
+    for(let y=y0;y<y1;y+=2) for(let x=x0;x<x1;x+=2){ const i=(y*W+x)*4,j=((y+dy)*W+(x+dx))*4; s+=Math.abs(d[i]-d[j])+Math.abs(d[i+1]-d[j+1])+Math.abs(d[i+2]-d[j+2]); n++; } return n>150? s/n : 1e9; };
+  const R=Math.min(Math.floor(Math.min(W,H)*0.85), 180); let scored=[];
+  for(let dy=0;dy<=R;dy++) for(let dx=-R;dx<=R;dx++){ if(Math.abs(dx)<7 && dy<7) continue; const v=sad(dx,dy); if(v<1e8) scored.push([dx,dy,v]); }
+  scored.sort((a,b)=>a[2]-b[2]);
+  const picks=[]; for(const cc of scored){ if(picks.length>=8) break; if(picks.some(q=>Math.hypot(q[0]-cc[0],q[1]-cc[1])<Math.max(5,W*0.04))) continue; picks.push(cc); }
+  if(picks.length<2) return null;
+  picks.sort((a,b)=>Math.hypot(a[0],a[1])-Math.hypot(b[0],b[1]));
+  const v1=picks[0]; let v2=null;
+  for(let i=1;i<picks.length;i++){ const cr=Math.abs(v1[0]*picks[i][1]-v1[1]*picks[i][0]); if(cr>0.25*Math.hypot(v1[0],v1[1])*Math.hypot(picks[i][0],picks[i][1])){ v2=picks[i]; break; } }
+  if(!v2) return null;
+  const up=1/sd;
+  // refine each vector at full resolution in a small window around the scaled-up guess
+  const fc=document.createElement('canvas'); fc.width=OW; fc.height=OH; fc.getContext('2d').drawImage(src,0,0); const fd=fc.getContext('2d').getImageData(0,0,OW,OH).data;
+  const fsad=(dx,dy)=>{ let s=0,n=0, st=4, x0=Math.max(2,-dx),x1=Math.min(OW-2,OW-dx),y0=Math.max(2,-dy),y1=Math.min(OH-2,OH-dy);
+    for(let y=y0;y<y1;y+=st) for(let x=x0;x<x1;x+=st){ const i=(y*OW+x)*4,j=((y+dy)*OW+(x+dx))*4; s+=Math.abs(fd[i]-fd[j])+Math.abs(fd[i+1]-fd[j+1])+Math.abs(fd[i+2]-fd[j+2]); n++; } return n>300? s/n:1e9; };
+  const win=Math.max(3,Math.round(up));
+  const refine=(v)=>{ const gx=Math.round(v[0]*up), gy=Math.round(v[1]*up); let best=[gx,gy,1e9];
+    for(let dy=-win;dy<=win;dy++) for(let dx=-win;dx<=win;dx++){ const val=fsad(gx+dx,gy+dy); if(val<best[2]) best=[gx+dx,gy+dy,val]; } return {x:best[0],y:best[1]}; };
+  return {v1:refine(v1), v2:refine(v2)};
+}
+function assembleTiling(){
+  if(!importTile) return;
+  if(!importTile.lat) importTile.lat = computeLattice2D(importTile.full||importTile.img);
+  if(!importTile.lat){ dropToast('Could not detect a clean repeat to tile these shapes.', false); return; }
+  traceTiled = !traceTiled;
+  const b=document.getElementById('btnAssemble'); if(b) b.textContent = traceTiled ? '✏️ Back to editing shapes' : '🧩 Tile the shapes into a pattern';
+  draw();
+}
 const TRACE_COLORS=['#c0472d','#e6d2a8','#3d8f6e','#caa14a','#5a7fb0','#9b5fb0'];
 function buildTraceGrad(){ const d=impDims(), W=d.W, H=d.H, src=impImg(); if(!src){ traceGrad=null; return; }
   const c=document.createElement('canvas'); c.width=W; c.height=H; const g=c.getContext('2d'); g.drawImage(src,0,0,W,H);
@@ -1237,47 +1295,78 @@ function traceHitPoint(sp){ // nearest editable dot across all shapes, within 11
 }
 function drawTraceOverlay(){
   const cel=document.getElementById('traceCurve'), cv2=cel?parseFloat(cel.value):0.85;
-  traceShapes.forEach((sh,si)=>{ const active=(si===traceActive);
-    if(sh.closed && sh.pts.length>=3){
-      const samp=sampleClosed(sh.pts, cv2).map(p=>traceW2S(p.x,p.y));
-      ctx.beginPath(); ctx.moveTo(samp[0].x,samp[0].y); for(let i=1;i<samp.length;i++) ctx.lineTo(samp[i].x,samp[i].y); ctx.closePath();
-      ctx.globalAlpha=0.42; ctx.fillStyle=sh.color; ctx.fill(); ctx.globalAlpha=1;
-      ctx.lineWidth=2.5; ctx.strokeStyle=sh.color; ctx.stroke();
-    } else {
-      const scr=sh.pts.map(p=>traceW2S(p.x,p.y)); if(scr.length){ ctx.beginPath(); scr.forEach((s,i)=>i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y)); ctx.lineWidth=2; ctx.strokeStyle=sh.color; ctx.stroke(); }
+  const lat = (traceTiled && importTile && importTile.lat) ? importTile.lat : null;
+  // offsets: just the base copy, or a grid of lattice translations covering the viewport
+  let offsets=[{dx:0,dy:0}];
+  if(lat){ offsets=[]; const W=cv.width/DPR, Hh=cv.height/DPR, det=lat.v1.x*lat.v2.y-lat.v1.y*lat.v2.x || 1;
+    const cs=[traceS2W(0,0),traceS2W(W,0),traceS2W(0,Hh),traceS2W(W,Hh)];
+    let amin=1e9,amax=-1e9,bmin=1e9,bmax=-1e9;
+    for(const c of cs){ const a=(c.x*lat.v2.y-c.y*lat.v2.x)/det, b=(lat.v1.x*c.y-lat.v1.y*c.x)/det; amin=Math.min(amin,a);amax=Math.max(amax,a);bmin=Math.min(bmin,b);bmax=Math.max(bmax,b); }
+    for(let a=Math.floor(amin)-2;a<=Math.ceil(amax)+2;a++) for(let b=Math.floor(bmin)-2;b<=Math.ceil(bmax)+2;b++) offsets.push({dx:a*lat.v1.x+b*lat.v2.x, dy:a*lat.v1.y+b*lat.v2.y});
+  }
+  for(const sh of traceShapes){ if(!(sh.closed && sh.pts.length>=3)) continue;
+    const samp=sampleClosed(sh.pts, cv2);
+    for(const o of offsets){ const scr=samp.map(p=>traceW2S(p.x+o.dx, p.y+o.dy));
+      ctx.beginPath(); ctx.moveTo(scr[0].x,scr[0].y); for(let i=1;i<scr.length;i++) ctx.lineTo(scr[i].x,scr[i].y); ctx.closePath();
+      ctx.globalAlpha = lat?1:0.42; ctx.fillStyle=sh.color; ctx.fill(); ctx.globalAlpha=1;
+      ctx.lineWidth = lat?1.4:2.5; ctx.strokeStyle = lat?'#12161c':sh.color; ctx.stroke();
     }
-    // editable dots: ◻ square = corner (sharp), ◯ circle = smooth; white first dot while active (click it to close)
+  }
+  // open shapes + editable dots (only while editing, not in the clean tiled view)
+  if(!lat){ traceShapes.forEach((sh,si)=>{ const active=(si===traceActive);
+    if(!(sh.closed && sh.pts.length>=3)){ const scr=sh.pts.map(p=>traceW2S(p.x,p.y)); if(scr.length){ ctx.beginPath(); scr.forEach((s,i)=>i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y)); ctx.lineWidth=2; ctx.strokeStyle=sh.color; ctx.stroke(); } }
     sh.pts.forEach((p,pi)=>{ const s=traceW2S(p.x,p.y); ctx.fillStyle=(active&&pi===0)?'#fff':sh.color; ctx.strokeStyle='#0a0d12'; ctx.lineWidth=1.6;
       if(p.corner){ ctx.beginPath(); ctx.rect(s.x-4.5,s.y-4.5,9,9); ctx.fill(); ctx.stroke(); }
-      else { ctx.beginPath(); ctx.arc(s.x,s.y,(active&&pi===0)?6:4,0,7); ctx.fill(); ctx.stroke(); } });
-  });
+      else { ctx.beginPath(); ctx.arc(s.x,s.y,(active&&pi===0)?6:4,0,7); ctx.fill(); ctx.stroke(); } }); }); }
+  updateTraceBar();
 }
-function enterTrace(){ if(!importTile) return; traceMode=true; importView='original'; tool='pan'; buildTraceGrad();
-  document.getElementById('btnTraceNew').style.display=''; document.getElementById('btnTraceDone').style.display=''; document.getElementById('traceCtl').style.display='';
+function updateTraceBar(){ const bar=document.getElementById('traceBar'); if(!bar) return;
+  const activeSh = traceActive>=0 ? traceShapes[traceActive] : null;
+  const num = traceActive>=0 ? (traceActive+1) : (traceShapes.length+1);
+  const col = activeSh ? activeSh.color : TRACE_COLORS[traceShapes.length%TRACE_COLORS.length];
+  const sw=document.getElementById('tbSw'); if(sw) sw.style.background=col;
+  const sh=document.getElementById('tbShape'); if(sh) sh.textContent='creature '+num;
+  const ct=document.getElementById('tbCount'); if(ct) ct.textContent=' · '+(activeSh?activeSh.pts.length:0)+' pts';
+  const nx=document.getElementById('tbNext'); if(nx) nx.textContent=(activeSh && activeSh.pts.length>=3)?'✓ Finish · next creature':'＋ Start next creature';
+}
+function traceUndo(){
+  if(traceActive>=0 && traceShapes[traceActive] && traceShapes[traceActive].pts.length){ traceShapes[traceActive].pts.pop();
+    if(!traceShapes[traceActive].pts.length){ traceShapes.splice(traceActive,1); traceActive=traceShapes.length?traceShapes.length-1:-1; } }
+  else if(traceShapes.length){ traceActive=traceShapes.length-1; traceShapes[traceActive].closed=false; if(traceShapes[traceActive].pts.length) traceShapes[traceActive].pts.pop(); }
+  draw();
+}
+function enterTrace(){ if(!importTile) return; traceMode=true; traceTiled=false; importView='original'; tool='pan'; buildTraceGrad();
+  const asm=document.getElementById('btnAssemble'); if(asm){ asm.style.display='none'; asm.textContent='🧩 Tile the shapes into a pattern'; }
+  document.getElementById('traceBar').style.display=''; updateTraceBar();
   const st=document.getElementById('importStatus'); if(st){ st.style.display=''; st.innerHTML='🖊 <b>Tracing.</b> <b>Shift-click</b> to add points around ONE creature (they snap to the outline). <b>Drag</b> a dot to move it; <b>double-click</b> a dot for ◻ sharp ↔ ◯ smooth; <b>right-click</b> to delete. Click the <b>white first dot</b> to close. <b>N</b> = next creature. <b>Scroll</b> = zoom, <b>Space-drag</b> or middle-drag = pan.'; }
   draw(); }
 function traceNewShape(){ if(traceActive>=0 && traceShapes[traceActive] && traceShapes[traceActive].pts.length>=3){ traceShapes[traceActive].closed=true; } traceActive=-1; draw(); }
 function doneTrace(){ traceNewShape(); traceMode=false; tool='pan';
-  document.getElementById('btnTraceNew').style.display='none'; document.getElementById('btnTraceDone').style.display='none'; document.getElementById('traceCtl').style.display='none';
+  document.getElementById('traceBar').style.display='none';
+  const asm=document.getElementById('btnAssemble'); if(asm) asm.style.display = traceShapes.some(s=>s.closed&&s.pts.length>=3) ? '' : 'none';
   const st=document.getElementById('importStatus'); if(st) st.innerHTML='✓ Traced '+traceShapes.filter(s=>s.closed).length+' shape(s). Save design to keep them.'; draw(); }
 // where a placed/dragged point goes: exactly at the cursor, unless "Snap to edges" is on
 function tracePlace(sp){ const w=traceS2W(sp.x,sp.y); const sn=document.getElementById('traceSnap'); return (sn&&sn.checked)?snapWorld(w):w; }
-// Shift-click empty = add a point exactly where clicked. Clicking ANY dot = grab it to move.
+function traceHitInShape(sp, si){ const sh=traceShapes[si]; if(!sh) return null; let hit=null,bd=12*12;
+  sh.pts.forEach((p,pi)=>{ const s=traceW2S(p.x,p.y),d=(s.x-sp.x)**2+(s.y-sp.y)**2; if(d<bd){bd=d;hit={si,pi};} }); return hit; }
+// Shift-click = ADD to the shape you're drawing (only its OWN dots grab, so you can trace right up against other shapes).
+// Plain click = grab ANY dot to move it.
 function traceDown(sp, add){
   // clicking the white first dot of the active open shape closes it
   if(traceActive>=0){ const sh=traceShapes[traceActive]; if(sh && sh.pts.length>=3){ const f=traceW2S(sh.pts[0].x,sh.pts[0].y); if((f.x-sp.x)**2+(f.y-sp.y)**2 < 13*13){ pushUndo(); sh.closed=true; traceActive=-1; draw(); return; } } }
-  const hit=traceHitPoint(sp); if(hit){ pushUndo(); traceDrag=hit; draw(); return; }   // click a dot → MOVE it (plain or shift)
-  if(add){                                                                              // Shift-click empty → ADD a point right there
-    const w=tracePlace(sp); pushUndo();
-    if(traceActive>=0){ traceShapes[traceActive].pts.push(w); }
-    else { const ins=nearestTraceEdge(sp);
-      if(ins && ins.d<16*16){ traceShapes[ins.si].pts.splice(ins.k,0,w); if(!traceShapes[ins.si].closed) traceActive=ins.si; }
-      else { traceShapes.push({pts:[w], color:TRACE_COLORS[traceShapes.length%TRACE_COLORS.length], closed:false}); traceActive=traceShapes.length-1; } }
-    draw();
+  if(add){                                                                     // SHIFT: adding to the active creature
+    if(traceActive>=0){ const own=traceHitInShape(sp, traceActive); if(own){ pushUndo(); traceDrag=own; draw(); return; }   // grab only THIS shape's dots
+      pushUndo(); traceShapes[traceActive].pts.push(tracePlace(sp)); draw(); return; }
+    // no active shape: insert into a nearby closed shape's edge, else start a new creature
+    const ins=nearestTraceEdge(sp);
+    if(ins && ins.d<16*16){ pushUndo(); traceShapes[ins.si].pts.splice(ins.k,0,tracePlace(sp)); if(!traceShapes[ins.si].closed) traceActive=ins.si; draw(); return; }
+    pushUndo(); traceShapes.push({pts:[tracePlace(sp)], color:TRACE_COLORS[traceShapes.length%TRACE_COLORS.length], closed:false}); traceActive=traceShapes.length-1; draw(); return;
   }
+  const hit=traceHitPoint(sp); if(hit){ pushUndo(); traceDrag=hit; draw(); }   // plain click → grab ANY dot to move
 }
 function _showImportBtns(on){ ['btnExitImport','btnConvertEdit','btnTrace','btnImpView'].forEach(id=>{const b=document.getElementById(id); if(b) b.style.display=on?'':'none';});
-  if(!on){ ['btnTraceNew','btnTraceDone','traceCtl'].forEach(id=>{const b=document.getElementById(id); if(b) b.style.display='none';});
+  if(!on){ const tb=document.getElementById('traceBar'); if(tb) tb.style.display='none'; traceTiled=false;
+    const asm=document.getElementById('btnAssemble'); if(asm) asm.style.display='none';
     traceMode=false; traceShapes=[]; traceActive=-1; traceDrag=null;
     const st=document.getElementById('importStatus'); if(st) st.style.display='none'; } }
 function exitImport(){ importTile=null; _showImportBtns(false); draw(); }
@@ -1964,8 +2053,10 @@ document.getElementById('btnExitImport').addEventListener('click',exitImport);
 document.getElementById('btnTrace').addEventListener('click',enterTrace);
 document.getElementById('btnImpView').addEventListener('click',toggleImpView);
 ['traceSnap','traceCurve'].forEach(id=>{ const e=document.getElementById(id); if(e){ e.addEventListener('input',draw); e.addEventListener('change',draw); } });
-document.getElementById('btnTraceNew').addEventListener('click',traceNewShape);
-document.getElementById('btnTraceDone').addEventListener('click',doneTrace);
+document.getElementById('tbUndo').addEventListener('click',traceUndo);
+document.getElementById('tbNext').addEventListener('click',()=>{ traceNewShape(); updateTraceBar(); });
+document.getElementById('tbDone').addEventListener('click',doneTrace);
+document.getElementById('btnAssemble').addEventListener('click',assembleTiling);
 document.getElementById('btnConvertEdit').addEventListener('click',convertImportToEditable);
 // Paste an image (⌘V / Ctrl+V) anywhere → import & auto-detect its tiling (convenient for community pieces).
 window.addEventListener('paste', e=>{
@@ -2082,7 +2173,7 @@ function loadState(s){
   if(s.importTile && s.importTileURL){ importView='original';
     const finish=()=>{ const tv=document.getElementById('btnImpView'); if(tv){ tv.style.display=''; tv.textContent='🔲 Show tiled'; }
       if(s.traceShapes && s.traceShapes.length){ traceShapes=s.traceShapes.map(t=>({pts:t.pts.map(p=>({x:p.x,y:p.y,corner:!!p.corner})),color:t.color,closed:!!t.closed}));
-        traceMode=true; traceActive=-1; buildTraceGrad(); const n=document.getElementById('btnTraceNew'),dn=document.getElementById('btnTraceDone'); if(n)n.style.display=''; if(dn)dn.style.display=''; } draw(); };
+        traceMode=true; traceActive=-1; buildTraceGrad(); const tb=document.getElementById('traceBar'); if(tb) tb.style.display=''; updateTraceBar(); } draw(); };
     const doSet=(full)=> setImportTile(s.importTileURL, s.importTile.PW, s.importTile.PH, finish, full);
     if(s.importFullURL){ const fi=new Image(); fi.onload=()=>doSet({img:fi, W:fi.width, H:fi.height, url:s.importFullURL}); fi.onerror=()=>doSet(null); fi.src=s.importFullURL; }
     else doSet(null);
@@ -4213,7 +4304,7 @@ function setupCollapsibleGroups(){
 setupCollapsibleGroups();
 
 /* boot */
-const APP_VERSION = 'build 85 (2026-07-28)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 86 (2026-07-28)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
