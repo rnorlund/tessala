@@ -237,6 +237,15 @@
   <div class="sideHd"><span>Style &amp; Output</span><button class="collapse" id="hideRight" title="Hide panel">›</button></div>
 
   <div class="group">
+    <div class="lbl">Open &amp; import</div>
+    <button class="act" id="btnLoad">📂 Load design (.json)</button>
+    <button class="act primary" id="btnImport" title="Import an existing tessellation image — opens a file picker (or just paste an image with ⌘V/Ctrl+V). Auto-detects the repeating tile and lays it out so you can pan, zoom, and re-export it (and Save it in our format).">🔍 Import a tessellation image <span style="opacity:.5">(or ⌘V)</span></button>
+    <button class="act primary" id="btnConvertEdit" title="Turn the imported tiling into an EDITABLE tile — sets up a square tile filled with the detected motif so you can drag the edges to carve the shape over the visible art. NOTE: it does not yet auto-trace the interlocking creature outline (that's in progress for 2-colour / clearly-outlined tilings)." style="display:none">✏️ Convert to editable tile</button>
+    <button class="act" id="btnExitImport" title="Leave import mode and return to the shape editor" style="display:none">✕ Exit import</button>
+    <div id="importStatus" class="hint" style="display:none;margin-top:4px"></div>
+  </div>
+
+  <div class="group">
     <div class="lbl">Colors</div>
     <div class="swatches">
       <div class="sw"><input type="color" id="colA" value="#e8734d"><span>Fill A</span></div>
@@ -341,11 +350,6 @@
     <button class="act" id="btnShape" title="Download the tile outline as a transparent PNG to hand to ChatGPT">⬇ Tile shape PNG</button>
     <button class="act" id="btnTilePng" title="Download JUST this one tile, filled with its current design, on a transparent background">⬇ Filled tile PNG</button>
     <button class="act" id="btnSave">Save design</button>
-    <button class="act" id="btnLoad">Load design</button>
-    <button class="act" id="btnImport" title="Import an existing tessellation image — opens a file picker (or just paste an image with ⌘V/Ctrl+V). Auto-detects the repeating tile and lays it out so you can pan, zoom, and re-export it (and Save it in our format). Note: recolor / shape-editing isn't available for imported raster art.">🔍 Import a tessellation <span style="opacity:.5">(or ⌘V)</span></button>
-    <button class="act primary" id="btnConvertEdit" title="Turn the imported tiling into an EDITABLE tile: a square tile filled with the detected motif (period-aligned so it still tiles seamlessly). Drag the edge dots to carve the interlocking boundary over the art. Best for ~square repeats." style="display:none">✏️ Convert to editable tile</button>
-    <button class="act" id="btnExitImport" title="Leave import mode and return to the shape editor" style="display:none">✕ Exit import</button>
-    <div id="importStatus" class="hint" style="display:none;margin-top:4px"></div>
   </div>
 </aside>
 
@@ -4052,7 +4056,7 @@ applyTooltips();
 try{ new MutationObserver(()=>applyTooltips()).observe(document.body,{childList:true,subtree:true}); }catch(e){}
 
 /* ===== Collapsible toolbar sections (expandable "tabs" so panels fit without scrolling) ===== */
-const SECTION_DEFAULT_OPEN = ['1 · Pattern (symmetry)','2 · Tool','Colors','Edit & create'];  // rest start collapsed
+const SECTION_DEFAULT_OPEN = ['1 · Pattern (symmetry)','2 · Tool','Open & import','Colors','Edit & create'];  // rest start collapsed
 function expandGroupOf(el){                                   // ensure a control's section is open (used by the tour)
   const g = el && el.closest && el.closest('.group');
   if(g && g.classList.contains('collapsed')){ const h=g.querySelector(':scope > .lbl.grpHead'); if(h) h.click(); }
@@ -4079,7 +4083,7 @@ function setupCollapsibleGroups(){
 setupCollapsibleGroups();
 
 /* boot */
-const APP_VERSION = 'build 81 (2026-07-28)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 82 (2026-07-28)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
