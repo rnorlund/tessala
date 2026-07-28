@@ -377,6 +377,9 @@
     <button class="ghost" id="tbDone" title="Finish tracing (Esc)">Done</button>
   </div>
   <div class="tbRow">
+    <button id="tbTile" title="Tile your traced creatures into a repeating pattern (auto-detects the repeat). Click again to go back to editing." style="background:#2f7d54">🧩 Tile the shapes into a pattern</button>
+  </div>
+  <div class="tbRow">
     <label title="Off = points land exactly where you click. On = each point snaps to the nearest crisp edge."><input type="checkbox" id="traceSnap"> 🧲 Snap to edges</label>
     <span style="margin-left:6px">curve</span><input type="range" id="traceCurve" min="0" max="1" step="0.05" value="0.85" title="Curvature of the smooth (◯) points: 0 = angular, 1 = fully rounded. Corner (◻) points stay sharp.">
   </div>
@@ -1337,11 +1340,16 @@ function traceUndo(){
 }
 function enterTrace(){ if(!importTile) return; traceMode=true; traceTiled=false; importView='original'; tool='pan'; buildTraceGrad();
   const asm=document.getElementById('btnAssemble'); if(asm){ asm.style.display='none'; asm.textContent='🧩 Tile the shapes into a pattern'; }
+  traceStartShape();                                             // begin in an empty "creature 1" so Shift-clicks build it right away
   document.getElementById('traceBar').style.display=''; updateTraceBar();
-  const st=document.getElementById('importStatus'); if(st){ st.style.display=''; st.innerHTML='🖊 <b>Tracing.</b> <b>Shift-click</b> to add points around ONE creature (they snap to the outline). <b>Drag</b> a dot to move it; <b>double-click</b> a dot for ◻ sharp ↔ ◯ smooth; <b>right-click</b> to delete. Click the <b>white first dot</b> to close. <b>N</b> = next creature. <b>Scroll</b> = zoom, <b>Space-drag</b> or middle-drag = pan.'; }
+  const st=document.getElementById('importStatus'); if(st){ st.style.display=''; st.innerHTML='🖊 <b>Tracing.</b> <b>Shift-click</b> to add points around ONE creature. <b>Drag</b> a dot to move; <b>double-click</b> = ◻ sharp / ◯ smooth; <b>right-click</b> = delete. <b>＋ Next creature</b> (or N) starts the next one; <b>🧩 Tile</b> assembles them. Scroll = zoom, Space-drag = pan.'; }
   draw(); }
-function traceNewShape(){ if(traceActive>=0 && traceShapes[traceActive] && traceShapes[traceActive].pts.length>=3){ traceShapes[traceActive].closed=true; } traceActive=-1; draw(); }
-function doneTrace(){ traceNewShape(); traceMode=false; tool='pan';
+function traceCloseActive(){ if(traceActive>=0 && traceShapes[traceActive]){ const sh=traceShapes[traceActive];
+    if(sh.pts.length>=3) sh.closed=true; else traceShapes.splice(traceActive,1); } traceActive=-1; }
+function traceStartShape(){ traceShapes.push({pts:[], color:TRACE_COLORS[traceShapes.length%TRACE_COLORS.length], closed:false}); traceActive=traceShapes.length-1; }
+function traceNewShape(){ traceCloseActive(); traceStartShape(); draw(); }   // finish current creature, begin the next
+function doneTrace(){ traceCloseActive(); traceShapes=traceShapes.filter(s=>s.pts.length>=3); traceShapes.forEach(s=>s.closed=true);
+  traceMode=false; tool='pan';
   document.getElementById('traceBar').style.display='none';
   const asm=document.getElementById('btnAssemble'); if(asm) asm.style.display = traceShapes.some(s=>s.closed&&s.pts.length>=3) ? '' : 'none';
   const st=document.getElementById('importStatus'); if(st) st.innerHTML='✓ Traced '+traceShapes.filter(s=>s.closed).length+' shape(s). Save design to keep them.'; draw(); }
@@ -1355,12 +1363,9 @@ function traceDown(sp, add){
   // clicking the white first dot of the active open shape closes it
   if(traceActive>=0){ const sh=traceShapes[traceActive]; if(sh && sh.pts.length>=3){ const f=traceW2S(sh.pts[0].x,sh.pts[0].y); if((f.x-sp.x)**2+(f.y-sp.y)**2 < 13*13){ pushUndo(); sh.closed=true; traceActive=-1; draw(); return; } } }
   if(add){                                                                     // SHIFT: adding to the active creature
-    if(traceActive>=0){ const own=traceHitInShape(sp, traceActive); if(own){ pushUndo(); traceDrag=own; draw(); return; }   // grab only THIS shape's dots
+    if(traceActive>=0){ const own=traceHitInShape(sp, traceActive); if(own){ pushUndo(); traceDrag=own; draw(); return; }   // grab only THIS shape's own dots
       pushUndo(); traceShapes[traceActive].pts.push(tracePlace(sp)); draw(); return; }
-    // no active shape: insert into a nearby closed shape's edge, else start a new creature
-    const ins=nearestTraceEdge(sp);
-    if(ins && ins.d<16*16){ pushUndo(); traceShapes[ins.si].pts.splice(ins.k,0,tracePlace(sp)); if(!traceShapes[ins.si].closed) traceActive=ins.si; draw(); return; }
-    pushUndo(); traceShapes.push({pts:[tracePlace(sp)], color:TRACE_COLORS[traceShapes.length%TRACE_COLORS.length], closed:false}); traceActive=traceShapes.length-1; draw(); return;
+    pushUndo(); traceShapes.push({pts:[tracePlace(sp)], color:TRACE_COLORS[traceShapes.length%TRACE_COLORS.length], closed:false}); traceActive=traceShapes.length-1; draw(); return;  // no active → start a new creature
   }
   const hit=traceHitPoint(sp); if(hit){ pushUndo(); traceDrag=hit; draw(); }   // plain click → grab ANY dot to move
 }
@@ -2057,6 +2062,8 @@ document.getElementById('tbUndo').addEventListener('click',traceUndo);
 document.getElementById('tbNext').addEventListener('click',()=>{ traceNewShape(); updateTraceBar(); });
 document.getElementById('tbDone').addEventListener('click',doneTrace);
 document.getElementById('btnAssemble').addEventListener('click',assembleTiling);
+document.getElementById('tbTile').addEventListener('click',()=>{ if(!traceTiled) traceCloseActive(); assembleTiling();
+  const b=document.getElementById('tbTile'); if(b) b.textContent = traceTiled ? '✏️ Back to editing shapes' : '🧩 Tile the shapes into a pattern'; });
 document.getElementById('btnConvertEdit').addEventListener('click',convertImportToEditable);
 // Paste an image (⌘V / Ctrl+V) anywhere → import & auto-detect its tiling (convenient for community pieces).
 window.addEventListener('paste', e=>{
@@ -4304,7 +4311,7 @@ function setupCollapsibleGroups(){
 setupCollapsibleGroups();
 
 /* boot */
-const APP_VERSION = 'build 86 (2026-07-28)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 87 (2026-07-28)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
