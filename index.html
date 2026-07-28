@@ -318,7 +318,7 @@
     <button class="act" id="btnTilePng" title="Download JUST this one tile, filled with its current design, on a transparent background">⬇ Filled tile PNG</button>
     <button class="act" id="btnSave">Save design</button>
     <button class="act" id="btnLoad">Load design</button>
-    <button class="act" id="btnImport" title="Import an existing tessellation image — auto-detects the repeating tile and lays it out so you can pan, zoom, and re-export it (and Save it in our format). Note: recolor / shape-editing isn't available for imported raster art.">🔍 Import a tessellation</button>
+    <button class="act" id="btnImport" title="Import an existing tessellation image — opens a file picker (or just paste an image with ⌘V/Ctrl+V). Auto-detects the repeating tile and lays it out so you can pan, zoom, and re-export it (and Save it in our format). Note: recolor / shape-editing isn't available for imported raster art.">🔍 Import a tessellation <span style="opacity:.5">(or ⌘V)</span></button>
     <button class="act" id="btnExitImport" title="Leave import mode and return to the shape editor" style="display:none">✕ Exit import</button>
     <div id="importStatus" class="hint" style="display:none;margin-top:4px"></div>
   </div>
@@ -1792,6 +1792,13 @@ document.getElementById('btnImport').addEventListener('click',()=>{
   inp.click();
 });
 document.getElementById('btnExitImport').addEventListener('click',exitImport);
+// Paste an image (⌘V / Ctrl+V) anywhere → import & auto-detect its tiling (convenient for community pieces).
+window.addEventListener('paste', e=>{
+  const ae=document.activeElement; if(ae && (ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.isContentEditable)) return;   // let text fields paste normally
+  const items=e.clipboardData && e.clipboardData.items; if(!items) return;
+  for(const it of items){ if(it.type && it.type.indexOf('image/')===0){ const f=it.getAsFile(); if(f){ e.preventDefault();
+    dropToast('📋 Pasted image — detecting the tiling…'); const r=new FileReader(); r.onload=()=>importTilingFromURL(r.result); r.readAsDataURL(f); return; } } }
+});
 // transient toast for drag-and-drop feedback
 // persistent (non-blocking) warning shown while the current tile self-crosses
 function toggleSelfXWarn(bad){
@@ -3997,7 +4004,7 @@ applyTooltips();
 try{ new MutationObserver(()=>applyTooltips()).observe(document.body,{childList:true,subtree:true}); }catch(e){}
 
 /* boot */
-const APP_VERSION = 'build 78 (2026-07-28)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 79 (2026-07-28)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
