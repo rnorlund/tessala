@@ -38,6 +38,15 @@
   .group{margin-bottom:18px}
   .group > .lbl{font-size:11px; text-transform:uppercase; letter-spacing:.06em;
     color:var(--muted); margin-bottom:7px; font-weight:600}
+  /* collapsible section headers (expandable "tabs" so the panel fits without scrolling) */
+  .group > .lbl.grpHead{ cursor:pointer; user-select:none; display:flex; align-items:center; justify-content:space-between;
+    gap:6px; padding:4px 8px; margin:0 -6px 6px; border:1px solid var(--line); border-radius:7px; background:var(--panel2); }
+  .group > .lbl.grpHead:hover{ color:var(--ink); border-color:#3a6ea5; }
+  .group > .lbl.grpHead::after{ content:'▾'; font-size:10px; opacity:.65; transition:transform .18s ease; }
+  .group.collapsed{ margin-bottom:8px; }
+  .group.collapsed > .lbl.grpHead{ margin-bottom:0; }
+  .group.collapsed > .lbl.grpHead::after{ transform:rotate(-90deg); }
+  .group.collapsed > .groupBody{ display:none; }
   .pat-grid{display:grid; grid-template-columns:1fr 1fr; gap:6px}
   .pat{
     background:var(--panel2); border:1px solid var(--line); border-radius:8px;
@@ -250,6 +259,9 @@
         <option value="difference">difference — psychedelic</option>
       </select></div>
     </div>
+  </div>
+  <div class="group">
+    <div class="lbl">Second image (figure B)</div>
     <div class="row" style="margin-top:4px;gap:6px;flex-wrap:wrap">
       <button id="expTile" style="padding:4px 9px;border-radius:6px;border:1px solid #2a3348;background:#0c0f16;color:var(--ink);font-size:11px;cursor:pointer" title="Download the tile's silhouette as a transparent PNG. Paint your figure inside that outline, then load it back as the main image (A) or as the 2nd figure (B).">⬇ tile shape</button>
       <button id="figB" style="padding:4px 9px;border-radius:6px;border:1px solid #2a3348;background:#0c0f16;color:var(--ink);font-size:11px;cursor:pointer" title="Load figure B — an image DRAWN TO THE TILE SHAPE (not a random photo). It fills the alternate cells, Angel-&-Devil style. Tip: hit ‘⬇ tile shape’ first to get the silhouette to paint into. A transparent-background PNG is best (or turn on ‘knock out background’).">＋ 2nd figure (B)…</button>
@@ -257,7 +269,10 @@
     </div>
     <div class="hint" style="font-size:10px;margin-top:2px"><b>Angel-&amp;-Devil style:</b> one tile shape, two fillings.
       <b>What image?</b> Not a random photo — a figure <b>drawn to fill the tile shape</b>. Easiest: hit <b>⬇ tile shape</b>, paint your creature inside that outline, then load one version as the main <b>image</b> (set A) and another as <b>2nd figure (B)</b> (the alternate cells). Transparent PNG is best; a white background works if you enable <b>knock out background</b>. You can also <b>Shift-drop</b> a file to set B.</div>
-    <label class="chk" style="margin-top:10px"><input type="checkbox" id="splitOn"> ✂ Split tile into two <b>different shapes</b></label>
+  </div>
+  <div class="group">
+    <div class="lbl">Split into two shapes</div>
+    <label class="chk" style="margin-top:2px"><input type="checkbox" id="splitOn"> ✂ Split tile into two <b>different shapes</b></label>
     <div id="splitCtl" style="display:none">
       <div class="row"><label>cut from</label><input type="range" id="cutA" min="0" max="1" step="0.01" value="0"></div>
       <div class="row"><label>cut to</label><input type="range" id="cutB" min="0" max="1" step="0.01" value="0.5"></div>
@@ -269,7 +284,10 @@
       <div class="hint" style="font-size:10px;margin-top:2px"><b>Sculpt the cut</b> (with the Shape tool): drag the cyan dots, <b>click the cut line to add</b> a point, <b>right-click a point to remove</b>. The endpoints snap to the tile edge. Two <b>different shapes</b> result (A = <span style="color:#e3b23c">gold</span>, B = <span style="color:#9b7de0">purple</span>); export each, fill it, load as <b>image</b> (→ A) and <b>2nd figure</b> (→ B).</div>
       <div class="hint" style="font-size:10px;margin-top:2px;color:#e0b070">⚠ On <b>rotational</b> patterns (3-fold / 4-fold / 6-fold) the two halves get spun around each centre into a <b>pinwheel</b>, not two separate figures. For two clean, readable shapes use <b>Glide, Square, Hexagon, or 2-fold</b>.</div>
     </div>
-    <label class="chk" style="margin-top:10px"><input type="checkbox" id="transOn"> 🌅 Transmutation (Sky &amp; Water)</label>
+  </div>
+  <div class="group">
+    <div class="lbl">Transmutation</div>
+    <label class="chk" style="margin-top:2px"><input type="checkbox" id="transOn"> 🌅 Transmutation (Sky &amp; Water)</label>
     <div id="transCtl" style="display:none">
       <div class="row"><label>direction</label><select id="transDir" class="tbsel"><option value="vert">vertical</option><option value="horiz">horizontal</option><option value="diag">diagonal</option></select></div>
       <div class="row"><label>morph at</label><input type="range" id="transCenter" min="0.1" max="0.9" step="0.02" value="0.5"></div>
@@ -286,6 +304,9 @@
       </div>
       <div class="hint" style="font-size:10px;margin-top:2px"><b>For a real shape change, turn on ✂ Split first</b> — then shape A (figure) rules the top and dissolves into the sky, while the <b>different</b> shape B emerges from the water below (figure-ground swap, clean interlock). Without split it's a single motif dissolving into the background.</div>
     </div>
+  </div>
+  <div class="group">
+    <div class="lbl">Line widths</div>
     <div class="row"><label>Outline width</label><input type="range" id="outW" min="0" max="6" step="0.5" value="1.5"></div>
     <div class="row"><label>Pen width</label><input type="range" id="penW" min="1" max="12" step="0.5" value="3"></div>
   </div>
@@ -299,7 +320,7 @@
   </div>
 
   <div class="group">
-    <div class="lbl">Create &amp; Output</div>
+    <div class="lbl">Edit &amp; create</div>
     <button class="act" id="btnUndo">↶ Undo (⌘/Ctrl-Z)</button>
     <button class="act primary" id="btnGen">✨ Idea generator</button>
     <button class="act" id="btnAI">🤖 AI fill workflow</button>
@@ -308,6 +329,9 @@
     <button class="act" id="btnClearDraw">Clear drawing</button>
     <div class="act" style="display:flex;align-items:center;gap:8px;cursor:default">curve / smoothness
       <input type="range" id="curveMain" min="0" max="2" step="0.05" value="1.3" style="flex:1" title="edge curvature — higher = smoother, rounder shapes"></div>
+  </div>
+  <div class="group">
+    <div class="lbl">Export &amp; save</div>
     <div class="act" style="display:flex;align-items:center;gap:8px;cursor:default">
       <button id="btnPng" style="all:unset;cursor:pointer;flex:1">Export PNG</button>
       <select id="pngScale" title="Export resolution — higher = sharper, bigger file" style="cursor:pointer;background:#0c0f16;color:inherit;border:1px solid #2a3348;border-radius:6px;padding:2px 4px">
@@ -1109,14 +1133,16 @@ function detectPeriod(d, W, Ht){
   const sad=(shift,horiz)=>{ let s=0,n=0;
     if(horiz){ const y0=Ht*0.2|0,y1=Ht*0.8|0; for(let y=y0;y<y1;y+=step) for(let x=10;x<W-shift-10;x+=step){ const i=idx(x,y),j=idx(x+shift,y); s+=Math.abs(d[i]-d[j])+Math.abs(d[i+1]-d[j+1])+Math.abs(d[i+2]-d[j+2]); n++; } }
     else { const x0=W*0.2|0,x1=W*0.8|0; for(let x=x0;x<x1;x+=step) for(let y=10;y<Ht-shift-10;y+=step){ const i=idx(x,y),j=idx(x,y+shift); s+=Math.abs(d[i]-d[j])+Math.abs(d[i+1]-d[j+1])+Math.abs(d[i+2]-d[j+2]); n++; } }
-    return n? s/n : 1e9; };
-  const best=(lo,hi,horiz)=>{ const vals=[]; let bv=1e9,sum=0; for(let sh=lo;sh<=hi;sh++){ const v=sad(sh,horiz); vals.push(v); sum+=v; if(v<bv) bv=v; } const avg=sum/vals.length;
+    return n>300 ? s/n : 1e9; };   // need enough overlap samples so a near-full-width shift isn't picked on noise
+  const best=(lo,hi,horiz)=>{ const good=[]; for(let sh=lo;sh<=hi;sh++){ const v=sad(sh,horiz); if(v<1e8) good.push([sh,v]); }   // drop invalid (too-thin-overlap) shifts
+    if(!good.length) return {p:lo, conf:0};
+    let bv=1e9,sum=0; for(const g of good){ sum+=g[1]; if(g[1]<bv) bv=g[1]; } const avg=sum/good.length;
     // the fundamental period is the SMALLEST shift whose SAD is near the global minimum — its multiples share that
     // minimum, so taking the global-min shift can land on 2× or 3× the true tile. This picks the smallest true period.
     const thresh = bv + Math.max(2, (avg-bv)*0.12);
-    let bp=lo; for(let k=0;k<vals.length;k++){ if(vals[k]<=thresh){ bp=lo+k; break; } }
+    let bp=good[0][0]; for(const g of good){ if(g[1]<=thresh){ bp=g[0]; break; } }
     return {p:bp, conf: avg>0?1-bv/avg:0}; };
-  const hx=best(40, Math.min(W>>1, 700), true), vy=best(40, Math.min(Ht>>1, 700), false);
+  const hx=best(40, Math.min(W-24, 1200), true), vy=best(40, Math.min(Ht-24, 1200), false);   // scan near full size → finds the larger rectangular super-cell that hexagonal/rotational tilings need
   return {PW:hx.p, PH:vy.p, conf:Math.min(hx.conf,vy.conf)};
 }
 function setImportTile(url, PW, PH, cb){
@@ -4025,8 +4051,35 @@ function applyTooltips(){
 applyTooltips();
 try{ new MutationObserver(()=>applyTooltips()).observe(document.body,{childList:true,subtree:true}); }catch(e){}
 
+/* ===== Collapsible toolbar sections (expandable "tabs" so panels fit without scrolling) ===== */
+const SECTION_DEFAULT_OPEN = ['1 · Pattern (symmetry)','2 · Tool','Colors','Edit & create'];  // rest start collapsed
+function expandGroupOf(el){                                   // ensure a control's section is open (used by the tour)
+  const g = el && el.closest && el.closest('.group');
+  if(g && g.classList.contains('collapsed')){ const h=g.querySelector(':scope > .lbl.grpHead'); if(h) h.click(); }
+}
+function setupCollapsibleGroups(){
+  document.querySelectorAll('#side .group, #sideR .group').forEach(g=>{
+    let head = g.querySelector(':scope > .lbl');
+    if(!head){ if(g.id==='shapeHelp'){ head=document.createElement('div'); head.className='lbl'; head.textContent='Shape tool help'; g.insertBefore(head, g.firstChild); } else return; }
+    if(head.classList.contains('grpHead')) return;           // already processed
+    const body=document.createElement('div'); body.className='groupBody';
+    while(head.nextSibling) body.appendChild(head.nextSibling);
+    g.appendChild(body);
+    head.classList.add('grpHead'); head.setAttribute('role','button'); head.tabIndex=0;
+    const label=head.textContent.replace(/\s+/g,' ').trim();
+    const key='tsec_'+(g.id||label).slice(0,28);
+    const apply=(open)=>{ g.classList.toggle('collapsed', !open); try{ localStorage.setItem(key, open?'1':'0'); }catch(e){} };
+    let stored=null; try{ stored=localStorage.getItem(key); }catch(e){}
+    apply(stored===null ? SECTION_DEFAULT_OPEN.some(d=>label.indexOf(d)===0) : stored==='1');
+    const toggle=()=>apply(g.classList.contains('collapsed'));
+    head.addEventListener('click', toggle);
+    head.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); toggle(); } });
+  });
+}
+setupCollapsibleGroups();
+
 /* boot */
-const APP_VERSION = 'build 80 (2026-07-28)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 81 (2026-07-28)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
@@ -4068,6 +4121,7 @@ resize();
   function show(){
     const s=TOUR[i], el=document.querySelector(s.sel);
     if(!el){ if(i<TOUR.length-1){ i++; return show(); } return end(); }
+    if(typeof expandGroupOf==='function') expandGroupOf(el);   // open the collapsible section holding this target
     let hole=document.getElementById('tourHole'), box=document.getElementById('tourBox');
     if(!hole){ hole=document.createElement('div'); hole.id='tourHole'; document.body.appendChild(hole); }
     if(!box){ box=document.createElement('div'); box.id='tourBox'; document.body.appendChild(box); }
