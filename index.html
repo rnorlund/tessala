@@ -318,6 +318,9 @@
     <button class="act" id="btnTilePng" title="Download JUST this one tile, filled with its current design, on a transparent background">⬇ Filled tile PNG</button>
     <button class="act" id="btnSave">Save design</button>
     <button class="act" id="btnLoad">Load design</button>
+    <button class="act" id="btnImport" title="Import an existing tessellation image — auto-detects the repeating tile and lays it out so you can pan, zoom, and re-export it (and Save it in our format). Note: recolor / shape-editing isn't available for imported raster art.">🔍 Import a tessellation</button>
+    <button class="act" id="btnExitImport" title="Leave import mode and return to the shape editor" style="display:none">✕ Exit import</button>
+    <div id="importStatus" class="hint" style="display:none;margin-top:4px"></div>
   </div>
 </aside>
 
@@ -754,6 +757,7 @@ function resetSplitCut(){
 }
 function setPattern(type){
   engine='simple';
+  if(importTile){ importTile=null; const b=document.getElementById('btnExitImport'); if(b) b.style.display='none'; const st=document.getElementById('importStatus'); if(st) st.style.display='none'; }
   const adv=document.getElementById('advCtl'); if(adv){ adv.style.display='none'; document.getElementById('btnAdvanced').style.display=''; }
   pat=buildPattern(type);
   resetShape();
@@ -1093,9 +1097,63 @@ function pathPoly(c, pts){
   for(let i=1;i<pts.length;i++) c.lineTo(pts[i].x, pts[i].y);
   c.closePath();
 }
+/* ===== Import an existing tessellation: auto-detect its repeat, then tile it =====
+   Reproduces any periodic tiling as a live, pannable/zoomable/exportable layer saved in our format.
+   (Reverse-engineering the interlocking tile OUTLINE into editable control points is a separate, harder
+   problem — a candidate for future community-driven features; for now this faithfully re-tiles the art.) */
+let importTile=null;   // {img, url, PW, PH} while an imported tiling is active
+function detectPeriod(d, W, Ht){
+  const idx=(x,y)=>(y*W+x)*4;
+  const step = (W*Ht>1500000) ? 5 : 3;
+  const sad=(shift,horiz)=>{ let s=0,n=0;
+    if(horiz){ const y0=Ht*0.2|0,y1=Ht*0.8|0; for(let y=y0;y<y1;y+=step) for(let x=10;x<W-shift-10;x+=step){ const i=idx(x,y),j=idx(x+shift,y); s+=Math.abs(d[i]-d[j])+Math.abs(d[i+1]-d[j+1])+Math.abs(d[i+2]-d[j+2]); n++; } }
+    else { const x0=W*0.2|0,x1=W*0.8|0; for(let x=x0;x<x1;x+=step) for(let y=10;y<Ht-shift-10;y+=step){ const i=idx(x,y),j=idx(x,y+shift); s+=Math.abs(d[i]-d[j])+Math.abs(d[i+1]-d[j+1])+Math.abs(d[i+2]-d[j+2]); n++; } }
+    return n? s/n : 1e9; };
+  const best=(lo,hi,horiz)=>{ const vals=[]; let bv=1e9,sum=0; for(let sh=lo;sh<=hi;sh++){ const v=sad(sh,horiz); vals.push(v); sum+=v; if(v<bv) bv=v; } const avg=sum/vals.length;
+    // the fundamental period is the SMALLEST shift whose SAD is near the global minimum — its multiples share that
+    // minimum, so taking the global-min shift can land on 2× or 3× the true tile. This picks the smallest true period.
+    const thresh = bv + Math.max(2, (avg-bv)*0.12);
+    let bp=lo; for(let k=0;k<vals.length;k++){ if(vals[k]<=thresh){ bp=lo+k; break; } }
+    return {p:bp, conf: avg>0?1-bv/avg:0}; };
+  const hx=best(40, Math.min(W>>1, 700), true), vy=best(40, Math.min(Ht>>1, 700), false);
+  return {PW:hx.p, PH:vy.p, conf:Math.min(hx.conf,vy.conf)};
+}
+function setImportTile(url, PW, PH, cb){
+  const im=new Image(); im.onload=()=>{ importTile={img:im, url, PW, PH}; tool='pan';
+    const b=document.getElementById('btnExitImport'); if(b) b.style.display='';
+    if(cb) cb(); draw(); }; im.src=url;
+}
+function importTilingFromURL(url){
+  const st=document.getElementById('importStatus'); if(st){ st.style.display=''; st.textContent='Analyzing the repeat…'; }
+  const img=new Image();
+  img.onload=()=>{ const W=img.width, Ht=img.height;
+    const oc=document.createElement('canvas'); oc.width=W; oc.height=Ht; const g=oc.getContext('2d'); g.drawImage(img,0,0);
+    let data; try{ data=g.getImageData(0,0,W,Ht).data; }catch(e){ if(st) st.textContent='Could not read that image.'; return; }
+    const {PW,PH,conf}=detectPeriod(data,W,Ht);
+    const OX=Math.min(30, Math.max(0,(W-PW)>>1)), OY=Math.min(30, Math.max(0,(Ht-PH)>>1));
+    const tc=document.createElement('canvas'); tc.width=PW; tc.height=PH; tc.getContext('2d').drawImage(img, OX,OY,PW,PH, 0,0,PW,PH);
+    pushUndo();
+    setImportTile(tc.toDataURL('image/png'), PW, PH, ()=>{ if(st){ st.style.display='';
+      st.innerHTML = (conf>0.35?'✓':'⚠')+' Detected a <b>'+PW+'×'+PH+'</b> repeat'+(conf>0.35?'':' — low confidence, may not be a clean tiling')+'. Pan/zoom to view · Export PNG to save it · Save design to keep the project.'; } });
+  };
+  img.onerror=()=>{ if(st) st.textContent='Could not load that image.'; };
+  img.src=url;
+}
+function drawImportedWallpaper(){
+  const W=cv.width/DPR, Ht=cv.height/DPR, k=scale/110;
+  const tw=importTile.PW*k, th=importTile.PH*k; if(tw<2||th<2) return;
+  const ox=((W/2+pan.x)%tw+tw)%tw, oy=((Ht/2+pan.y)%th+th)%th;
+  for(let x=ox-tw; x<W+tw; x+=tw) for(let y=oy-th; y<Ht+th; y+=th)
+    ctx.drawImage(importTile.img, x, y, tw, th);
+}
+function exitImport(){ importTile=null;
+  const b=document.getElementById('btnExitImport'); if(b) b.style.display='none';
+  const st=document.getElementById('importStatus'); if(st) st.style.display='none'; draw(); }
+
 function draw(){
   const W=cv.width/DPR, H=cv.height/DPR;
   ctx.clearRect(0,0,W,H);
+  if(importTile){ drawImportedWallpaper(); return; }   // imported-tessellation mode: just tile the detected repeat
   const outline=buildOutline();
   const baseCen=centroid(outline);
   // real-time self-crossing check (simple engine): a self-intersecting tile still "tiles" but looks uneven,
@@ -1703,9 +1761,11 @@ function snapshot(includeImage){
     splitOn, splitCut:{ta:splitCut.ta, tb:splitCut.tb, bend:splitCut.bend, mids:(splitCut.mids||[]).map(m=>({x:m.x,y:m.y}))},
     transOn, transDir, transCenter, transBand, transGrowth, transSky, transWater,
     edgePtsB: edgePtsB?cloneEp(edgePtsB):null,
-    colors:{A:val('colA'),B:val('colB'),out:val('colOutline'),pen:val('colPen')}};
+    colors:{A:val('colA'),B:val('colB'),out:val('colOutline'),pen:val('colPen')},
+    importTile: importTile?{PW:importTile.PW,PH:importTile.PH}:null};
   if(includeImage && texImageURL) o.texImageURL=texImageURL;
   if(includeImage && texImageBURL) o.texImageBURL=texImageBURL;
+  if(includeImage && importTile) o.importTileURL=importTile.url;   // embed the detected tile so the project reproduces standalone
   return JSON.stringify(o);
 }
 let lastSaveName='';
@@ -1726,6 +1786,12 @@ document.getElementById('btnLoad').addEventListener('click',()=>{
     r.onload=()=>{ try{loadState(JSON.parse(r.result));}catch(err){alert('Bad file');} }; r.readAsText(f);};
   inp.click();
 });
+document.getElementById('btnImport').addEventListener('click',()=>{
+  const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
+  inp.onchange=()=>{ const f=inp.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>importTilingFromURL(r.result); r.readAsDataURL(f); };
+  inp.click();
+});
+document.getElementById('btnExitImport').addEventListener('click',exitImport);
 // transient toast for drag-and-drop feedback
 // persistent (non-blocking) warning shown while the current tile self-crosses
 function toggleSelfXWarn(bad){
@@ -1830,6 +1896,9 @@ function loadState(s){
     document.getElementById('advCtl').style.display='none';
     document.getElementById('btnAdvanced').style.display='';
   }
+  // imported-tessellation layer (re-tiles a detected repeat); overrides the shape engine while active
+  if(s.importTile && s.importTileURL){ setImportTile(s.importTileURL, s.importTile.PW, s.importTile.PH); }
+  else { importTile=null; const b=document.getElementById('btnExitImport'); if(b) b.style.display='none'; const st=document.getElementById('importStatus'); if(st) st.style.display='none'; }
   draw();
 }
 
@@ -3928,7 +3997,7 @@ applyTooltips();
 try{ new MutationObserver(()=>applyTooltips()).observe(document.body,{childList:true,subtree:true}); }catch(e){}
 
 /* boot */
-const APP_VERSION = 'build 77 (2026-07-27)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 78 (2026-07-28)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
