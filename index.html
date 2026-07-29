@@ -34,6 +34,8 @@
     border-radius:6px; width:26px; height:26px; cursor:pointer; font-size:15px; line-height:1; flex:0 0 auto; }
   .collapse:hover{ border-color:var(--accent); }
   #topbar .pill.ptog{ cursor:pointer; }
+  #topbar .pill.ptog:not(.off){ border-color:var(--accent); color:var(--ink); background:rgba(58,110,165,.35); }   /* panel SHOWN = highlighted */
+  #topbar .pill.ptog.off{ opacity:.5; }                                                                            /* panel HIDDEN = dimmed */
   #topbar .pill.ptog:hover{ border-color:var(--accent); color:var(--ink); }
   .group{margin-bottom:18px}
   .group > .lbl{font-size:11px; text-transform:uppercase; letter-spacing:.06em;
@@ -380,9 +382,17 @@
     <button id="tbTile" title="Tile your traced creatures into a repeating pattern (auto-detects the repeat). Click again to go back to editing." style="background:#2f7d54">🧩 Tile the shapes into a pattern</button>
   </div>
   <div class="tbRow">
+    <button class="ghost" id="tbExport" title="Download the pattern as a PNG (dots hidden — clean)">⬇ Export PNG</button>
+    <button class="ghost" id="tbSave" title="Save this design (.json) to reopen and keep editing later">💾 Save design</button>
+  </div>
+  <div class="tbRow">
     <label title="Off = points land exactly where you click. On = each point snaps to the nearest crisp edge."><input type="checkbox" id="traceSnap"> 🧲 Snap to edges</label>
-    <span style="margin-left:6px">curve</span><input type="range" id="traceCurve" min="0" max="1" step="0.05" value="0.85" title="Curvature of the smooth (◯) points: 0 = angular, 1 = fully rounded. Corner (◻) points stay sharp.">
-    <span style="margin-left:6px">close gaps</span><input type="range" id="traceGap" min="0" max="6" step="0.5" value="1.5" title="When tiled, grow each creature outward slightly so neighbours overlap and white slivers vanish. 0 = exact traced edges.">
+  </div>
+  <div class="tbRow">
+    <span style="width:84px;flex:none">curve</span><input type="range" id="traceCurve" min="0" max="1" step="0.05" value="0.85" style="flex:1" title="Curvature of the smooth (◯) points: 0 = angular, 1 = fully rounded. Corner (◻) points stay sharp.">
+  </div>
+  <div class="tbRow">
+    <span style="width:84px;flex:none">close gaps</span><input type="range" id="traceGap" min="0" max="14" step="0.5" value="3" style="flex:1" title="Grow each creature outward so adjacent shapes overlap and the gap between them (and white slivers when tiled) closes. 0 = exact traced edges.">
   </div>
   <div class="tbHint"><b>Shift-click</b> = add point · <b>drag</b> a dot = move · <b>double-click</b> a dot = ◻ sharp / ◯ smooth · <b>right-click</b> = delete · click the <b>white dot</b> to close · <b>Space-drag</b> or scroll = pan / zoom</div>
 </div>
@@ -1225,7 +1235,7 @@ function drawImportedView(){
 
 /* ===== Guided tracer: click rough key points around a creature; each snaps to the crisp edge; smooth closed curve;
    press N for the next creature in a new colour; drag dots to adjust. Isolated over the imported wallpaper. ===== */
-let traceMode=false, traceShapes=[], traceActive=-1, traceDrag=null, traceGrad=null, traceGW=0, traceGH=0, _spacePan=false, traceTiled=false;
+let traceMode=false, traceShapes=[], traceActive=-1, traceDrag=null, traceGrad=null, traceGW=0, traceGH=0, _spacePan=false, traceTiled=false, _traceExport=false;
 // find the two fundamental translation vectors of the image (2D autocorrelation) — used to tile the traced shapes
 function computeLattice2D(src){
   const OW=src.width||src.naturalWidth, OH=src.height||src.naturalHeight; if(!OW) return null;
@@ -1318,7 +1328,7 @@ function drawTraceOverlay(){
     for(const c of cs){ const a=(c.x*lat.v2.y-c.y*lat.v2.x)/det, b=(lat.v1.x*c.y-lat.v1.y*c.x)/det; amin=Math.min(amin,a);amax=Math.max(amax,a);bmin=Math.min(bmin,b);bmax=Math.max(bmax,b); }
     for(let a=Math.floor(amin)-2;a<=Math.ceil(amax)+2;a++) for(let b=Math.floor(bmin)-2;b<=Math.ceil(bmax)+2;b++) offsets.push({dx:a*lat.v1.x+b*lat.v2.x, dy:a*lat.v1.y+b*lat.v2.y});
   }
-  const gel=document.getElementById('traceGap'), gap=(lat&&gel)?parseFloat(gel.value):0;   // grow shapes to close slivers (only in tiled view)
+  const gel=document.getElementById('traceGap'), gap=gel?parseFloat(gel.value):0;   // grow each shape outward to close gaps — applies in BOTH the editing preview and the tiled view
   for(const sh of traceShapes){ if(!(sh.closed && sh.pts.length>=3)) continue;
     let samp=sampleClosed(sh.pts, cv2); if(gap>0) samp=offsetPoly(samp, gap);
     for(const o of offsets){ const scr=samp.map(p=>traceW2S(p.x+o.dx, p.y+o.dy));
@@ -1330,7 +1340,7 @@ function drawTraceOverlay(){
   // open shapes + editable dots (only while editing, not in the clean tiled view)
   // editable dots (base copy) whenever we're in a trace session — shown even over the live tiling, so
   // dragging a point re-tiles instantly. After "Done" (traceMode off) they're hidden for a clean pattern.
-  if(traceMode){ traceShapes.forEach((sh,si)=>{ const active=(si===traceActive);
+  if(traceMode && !_traceExport){ traceShapes.forEach((sh,si)=>{ const active=(si===traceActive);
     if(!(sh.closed && sh.pts.length>=3)){ const scr=sh.pts.map(p=>traceW2S(p.x,p.y)); if(scr.length){ ctx.beginPath(); scr.forEach((s,i)=>i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y)); ctx.lineWidth=2; ctx.strokeStyle=sh.color; ctx.stroke(); } }
     sh.pts.forEach((p,pi)=>{ const s=traceW2S(p.x,p.y); ctx.fillStyle=(active&&pi===0)?'#fff':sh.color; ctx.strokeStyle='#0a0d12'; ctx.lineWidth=1.6;
       if(p.corner){ ctx.beginPath(); ctx.rect(s.x-4.5,s.y-4.5,9,9); ctx.fill(); ctx.stroke(); }
@@ -1346,6 +1356,7 @@ function updateTraceBar(){ const bar=document.getElementById('traceBar'); if(!ba
   if(activeSh){ if(sh) sh.textContent='creature '+(traceActive+1); if(ct) ct.textContent=' · '+activeSh.pts.length+' pts';
     if(nx) nx.textContent=(activeSh.pts.length>=3)?'✓ Finish · next creature':'＋ Next creature'; }
   else { if(sh) sh.textContent=closedN+' shape'+(closedN===1?'':'s')+' traced'; if(ct) ct.textContent=''; if(nx) nx.textContent='＋ Add another creature'; }
+  const tt=document.getElementById('tbTile'); if(tt) tt.textContent = traceTiled ? '✏️ Back to editing shapes' : '🧩 Tile the shapes into a pattern';
 }
 function traceUndo(){
   if(traceActive>=0 && traceShapes[traceActive] && traceShapes[traceActive].pts.length){ traceShapes[traceActive].pts.pop();
@@ -1362,7 +1373,7 @@ function enterTrace(){ if(!importTile) return; traceMode=true; traceTiled=false;
 function traceCloseActive(){ if(traceActive>=0 && traceShapes[traceActive]){ const sh=traceShapes[traceActive];
     if(sh.pts.length>=3) sh.closed=true; else traceShapes.splice(traceActive,1); } traceActive=-1; }
 function traceStartShape(){ traceShapes.push({pts:[], color:TRACE_COLORS[traceShapes.length%TRACE_COLORS.length], closed:false}); traceActive=traceShapes.length-1; }
-function traceNewShape(){ traceCloseActive(); traceStartShape(); draw(); }   // finish current creature, begin the next
+function traceNewShape(){ traceCloseActive(); traceTiled=false; traceStartShape(); draw(); }   // finish current creature → back to the reference image → begin the next
 function doneTrace(){ traceCloseActive(); traceShapes=traceShapes.filter(s=>s.pts.length>=3); traceShapes.forEach(s=>s.closed=true);
   traceMode=false; tool='pan';
   document.getElementById('traceBar').style.display='none';
@@ -2077,6 +2088,10 @@ document.getElementById('tbUndo').addEventListener('click',traceUndo);
 document.getElementById('tbNext').addEventListener('click',()=>{ traceNewShape(); updateTraceBar(); });
 document.getElementById('tbDone').addEventListener('click',doneTrace);
 document.getElementById('btnAssemble').addEventListener('click',assembleTiling);
+document.getElementById('tbExport').addEventListener('click',()=>{ _traceExport=true;   // hide the edit dots for a clean PNG
+  try{ const sc=parseInt((document.getElementById('pngScale')||{}).value)||2; const a=document.createElement('a'); a.download='tessellation.png'; a.href=renderToDataURL(sc); a.click(); }
+  finally{ _traceExport=false; draw(); } });
+document.getElementById('tbSave').addEventListener('click',()=>{ const b=document.getElementById('btnSave'); if(b) b.click(); });
 document.getElementById('tbTile').addEventListener('click',()=>{ if(!traceTiled) traceCloseActive(); assembleTiling();
   const b=document.getElementById('tbTile'); if(b) b.textContent = traceTiled ? '✏️ Back to editing shapes' : '🧩 Tile the shapes into a pattern'; });
 document.getElementById('btnConvertEdit').addEventListener('click',convertImportToEditable);
@@ -4146,17 +4161,22 @@ function applyCreature(c){
 })();
 
 /* ---- collapsible panels ---- */
+function syncPanelToggles(){ const l=document.getElementById('tgLeft'), r=document.getElementById('tgRight');
+  if(l) l.classList.toggle('off', document.getElementById('side').classList.contains('hidden'));
+  if(r) r.classList.toggle('off', document.getElementById('sideR').classList.contains('hidden')); }
 function togglePanel(id, force){
   const el=document.getElementById(id);
   if(force===true) el.classList.add('hidden');
   else if(force===false) el.classList.remove('hidden');
   else el.classList.toggle('hidden');
+  syncPanelToggles();
   resize();   // canvas follows the stage width
 }
 document.getElementById('tgLeft').addEventListener('click',()=>togglePanel('side'));
 document.getElementById('tgRight').addEventListener('click',()=>togglePanel('sideR'));
 document.getElementById('hideLeft').addEventListener('click',()=>togglePanel('side',true));
 document.getElementById('hideRight').addEventListener('click',()=>togglePanel('sideR',true));
+syncPanelToggles();
 
 /* ===== Tooltips on every control (title=) — applied at load + to anything added later ===== */
 const TOOLTIPS={
@@ -4326,7 +4346,7 @@ function setupCollapsibleGroups(){
 setupCollapsibleGroups();
 
 /* boot */
-const APP_VERSION = 'build 90 (2026-07-29)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 91 (2026-07-29)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
@@ -4361,10 +4381,12 @@ resize();
     {sel:'.swatches',  t:'Colour it',          x:'Set your two fill colours. “Shaded fills” adds a soft gradient for a richer look.'},
     {sel:'#splitOn',   t:'Two shapes in one',  x:'Split cuts each tile into two different interlocking shapes — the trick behind two-creature (Angel-&-Devil) designs.'},
     {sel:'#btnAI',     t:'Let AI draw it',     x:'Prefer a real creature? Generate one and let it fill the tile automatically (your key, or a local model).'},
-    {sel:'#btnPng',    t:'Export & save',      x:'Download your tessellation as a PNG, or Save the design to reopen later. That’s the whole loop — enjoy!'}
+    {sel:'#btnImport', t:'Import a real tessellation', x:'Have an Escher tiling you love? Import it (or paste with ⌘V) — it shows as-is. Then 🖊 <b>Trace</b> each creature (Shift-click points around it), <b>＋ Next creature</b> for the next, and 🧩 <b>Tile</b> to turn it into your own editable, gap-free pattern. Drag points anytime to reshape; “close gaps” hides seams.'},
+    {sel:'#btnPng',    t:'Export & save',      x:'Download your tessellation as a PNG, or Save the design to reopen later. That’s the whole loop — enjoy! (Press Esc to leave this tour.)'}
   ];
   let i=0;
   function end(){ ['tourHole','tourBox'].forEach(id=>{const e=document.getElementById(id); if(e) e.remove();}); }
+  window.addEventListener('keydown', e=>{ if(e.key==='Escape' && document.getElementById('tourBox')){ e.preventDefault(); e.stopImmediatePropagation(); end(); } }, true);   // Esc exits the tour immediately
   function show(){
     const s=TOUR[i], el=document.querySelector(s.sel);
     if(!el){ if(i<TOUR.length-1){ i++; return show(); } return end(); }
