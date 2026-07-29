@@ -1325,12 +1325,13 @@ function drawTraceOverlay(){
 }
 function updateTraceBar(){ const bar=document.getElementById('traceBar'); if(!bar) return;
   const activeSh = traceActive>=0 ? traceShapes[traceActive] : null;
-  const num = traceActive>=0 ? (traceActive+1) : (traceShapes.length+1);
+  const closedN = traceShapes.filter(s=>s.closed && s.pts.length>=3).length;
   const col = activeSh ? activeSh.color : TRACE_COLORS[traceShapes.length%TRACE_COLORS.length];
-  const sw=document.getElementById('tbSw'); if(sw) sw.style.background=col;
-  const sh=document.getElementById('tbShape'); if(sh) sh.textContent='creature '+num;
-  const ct=document.getElementById('tbCount'); if(ct) ct.textContent=' · '+(activeSh?activeSh.pts.length:0)+' pts';
-  const nx=document.getElementById('tbNext'); if(nx) nx.textContent=(activeSh && activeSh.pts.length>=3)?'✓ Finish · next creature':'＋ Start next creature';
+  const sw=document.getElementById('tbSw'), sh=document.getElementById('tbShape'), ct=document.getElementById('tbCount'), nx=document.getElementById('tbNext');
+  if(sw) sw.style.background=col;
+  if(activeSh){ if(sh) sh.textContent='creature '+(traceActive+1); if(ct) ct.textContent=' · '+activeSh.pts.length+' pts';
+    if(nx) nx.textContent=(activeSh.pts.length>=3)?'✓ Finish · next creature':'＋ Next creature'; }
+  else { if(sh) sh.textContent=closedN+' shape'+(closedN===1?'':'s')+' traced'; if(ct) ct.textContent=''; if(nx) nx.textContent='＋ Add another creature'; }
 }
 function traceUndo(){
   if(traceActive>=0 && traceShapes[traceActive] && traceShapes[traceActive].pts.length){ traceShapes[traceActive].pts.pop();
@@ -1341,7 +1342,7 @@ function traceUndo(){
 function enterTrace(){ if(!importTile) return; traceMode=true; traceTiled=false; importView='original'; tool='pan'; buildTraceGrad();
   const asm=document.getElementById('btnAssemble'); if(asm){ asm.style.display='none'; asm.textContent='🧩 Tile the shapes into a pattern'; }
   traceStartShape();                                             // begin in an empty "creature 1" so Shift-clicks build it right away
-  document.getElementById('traceBar').style.display=''; updateTraceBar();
+  document.getElementById('traceBar').style.display='block'; updateTraceBar();
   const st=document.getElementById('importStatus'); if(st){ st.style.display=''; st.innerHTML='🖊 <b>Tracing.</b> <b>Shift-click</b> to add points around ONE creature. <b>Drag</b> a dot to move; <b>double-click</b> = ◻ sharp / ◯ smooth; <b>right-click</b> = delete. <b>＋ Next creature</b> (or N) starts the next one; <b>🧩 Tile</b> assembles them. Scroll = zoom, Space-drag = pan.'; }
   draw(); }
 function traceCloseActive(){ if(traceActive>=0 && traceShapes[traceActive]){ const sh=traceShapes[traceActive];
@@ -2180,7 +2181,7 @@ function loadState(s){
   if(s.importTile && s.importTileURL){ importView='original';
     const finish=()=>{ const tv=document.getElementById('btnImpView'); if(tv){ tv.style.display=''; tv.textContent='🔲 Show tiled'; }
       if(s.traceShapes && s.traceShapes.length){ traceShapes=s.traceShapes.map(t=>({pts:t.pts.map(p=>({x:p.x,y:p.y,corner:!!p.corner})),color:t.color,closed:!!t.closed}));
-        traceMode=true; traceActive=-1; buildTraceGrad(); const tb=document.getElementById('traceBar'); if(tb) tb.style.display=''; updateTraceBar(); } draw(); };
+        traceMode=true; traceActive=-1; buildTraceGrad(); const tb=document.getElementById('traceBar'); if(tb) tb.style.display='block'; updateTraceBar(); } draw(); };
     const doSet=(full)=> setImportTile(s.importTileURL, s.importTile.PW, s.importTile.PH, finish, full);
     if(s.importFullURL){ const fi=new Image(); fi.onload=()=>doSet({img:fi, W:fi.width, H:fi.height, url:s.importFullURL}); fi.onerror=()=>doSet(null); fi.src=s.importFullURL; }
     else doSet(null);
@@ -4311,7 +4312,7 @@ function setupCollapsibleGroups(){
 setupCollapsibleGroups();
 
 /* boot */
-const APP_VERSION = 'build 87 (2026-07-28)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 88 (2026-07-29)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
