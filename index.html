@@ -382,6 +382,7 @@
   <div class="tbRow">
     <label title="Off = points land exactly where you click. On = each point snaps to the nearest crisp edge."><input type="checkbox" id="traceSnap"> 🧲 Snap to edges</label>
     <span style="margin-left:6px">curve</span><input type="range" id="traceCurve" min="0" max="1" step="0.05" value="0.85" title="Curvature of the smooth (◯) points: 0 = angular, 1 = fully rounded. Corner (◻) points stay sharp.">
+    <span style="margin-left:6px">close gaps</span><input type="range" id="traceGap" min="0" max="6" step="0.5" value="1.5" title="When tiled, grow each creature outward slightly so neighbours overlap and white slivers vanish. 0 = exact traced edges.">
   </div>
   <div class="tbHint"><b>Shift-click</b> = add point · <b>drag</b> a dot = move · <b>double-click</b> a dot = ◻ sharp / ◯ smooth · <b>right-click</b> = delete · click the <b>white dot</b> to close · <b>Space-drag</b> or scroll = pan / zoom</div>
 </div>
@@ -1273,6 +1274,16 @@ function nearestTraceEdge(sp){ let best=null; traceShapes.forEach((sh,si)=>{ con
   for(let k=0;k<lim;k++){ const a=traceW2S(sh.pts[k].x,sh.pts[k].y), b=traceW2S(sh.pts[(k+1)%n].x,sh.pts[(k+1)%n].y), m={x:(a.x+b.x)/2,y:(a.y+b.y)/2}, d=(m.x-sp.x)**2+(m.y-sp.y)**2; if(!best||d<best.d) best={si,k:k+1,d}; } }); return best; }
 // corner-aware closed Catmull-Rom → square points give sharp corners, round points give smooth curves
 // c ∈ [0,1]: 0 = straight polygon (angular), 1 = fully rounded Catmull-Rom through the smooth points. Corner points stay sharp.
+// grow (d>0) / shrink a closed polygon along its outward vertex normals — used to close white slivers between tiles
+function offsetPoly(pts, d){ const n=pts.length; if(n<3 || !d) return pts;
+  let area=0; for(let i=0;i<n;i++){ const a=pts[i], b=pts[(i+1)%n]; area+=a.x*b.y-b.x*a.y; }
+  const s=(area>0)?1:-1, out=[];
+  for(let i=0;i<n;i++){ const p=pts[i], a=pts[(i-1+n)%n], b=pts[(i+1)%n];
+    const ex=p.x-a.x, ey=p.y-a.y, L1=Math.hypot(ex,ey)||1, fx=b.x-p.x, fy=b.y-p.y, L2=Math.hypot(fx,fy)||1;
+    let nx=(ey/L1 + fy/L2), ny=(-ex/L1 - fx/L2); const L=Math.hypot(nx,ny)||1; nx/=L; ny/=L;
+    out.push({x:p.x + s*nx*d, y:p.y + s*ny*d}); }
+  return out;
+}
 function sampleClosed(pts, c){ const n=pts.length; if(n<3) return pts.map(p=>({x:p.x,y:p.y}));
   if(c==null) c=0.85; const out=[], P=i=>pts[((i%n)+n)%n], ST=16;
   for(let i=0;i<n;i++){ const p0=P(i-1),p1=P(i),p2=P(i+1),p3=P(i+2), sharp=p1.corner||p2.corner;
@@ -1307,8 +1318,9 @@ function drawTraceOverlay(){
     for(const c of cs){ const a=(c.x*lat.v2.y-c.y*lat.v2.x)/det, b=(lat.v1.x*c.y-lat.v1.y*c.x)/det; amin=Math.min(amin,a);amax=Math.max(amax,a);bmin=Math.min(bmin,b);bmax=Math.max(bmax,b); }
     for(let a=Math.floor(amin)-2;a<=Math.ceil(amax)+2;a++) for(let b=Math.floor(bmin)-2;b<=Math.ceil(bmax)+2;b++) offsets.push({dx:a*lat.v1.x+b*lat.v2.x, dy:a*lat.v1.y+b*lat.v2.y});
   }
+  const gel=document.getElementById('traceGap'), gap=(lat&&gel)?parseFloat(gel.value):0;   // grow shapes to close slivers (only in tiled view)
   for(const sh of traceShapes){ if(!(sh.closed && sh.pts.length>=3)) continue;
-    const samp=sampleClosed(sh.pts, cv2);
+    let samp=sampleClosed(sh.pts, cv2); if(gap>0) samp=offsetPoly(samp, gap);
     for(const o of offsets){ const scr=samp.map(p=>traceW2S(p.x+o.dx, p.y+o.dy));
       ctx.beginPath(); ctx.moveTo(scr[0].x,scr[0].y); for(let i=1;i<scr.length;i++) ctx.lineTo(scr[i].x,scr[i].y); ctx.closePath();
       ctx.globalAlpha = lat?1:0.42; ctx.fillStyle=sh.color; ctx.fill(); ctx.globalAlpha=1;
@@ -1370,7 +1382,7 @@ function traceDown(sp, add){
   }
   const hit=traceHitPoint(sp); if(hit){ pushUndo(); traceDrag=hit; draw(); }   // plain click → grab ANY dot to move
 }
-function _showImportBtns(on){ ['btnExitImport','btnConvertEdit','btnTrace','btnImpView'].forEach(id=>{const b=document.getElementById(id); if(b) b.style.display=on?'':'none';});
+function _showImportBtns(on){ ['btnExitImport','btnTrace','btnImpView'].forEach(id=>{const b=document.getElementById(id); if(b) b.style.display=on?'':'none';});   // (Convert-to-editable retired — tracer replaces it)
   if(!on){ const tb=document.getElementById('traceBar'); if(tb) tb.style.display='none'; traceTiled=false;
     const asm=document.getElementById('btnAssemble'); if(asm) asm.style.display='none';
     traceMode=false; traceShapes=[]; traceActive=-1; traceDrag=null;
@@ -2058,7 +2070,7 @@ document.getElementById('btnImport').addEventListener('click',()=>{
 document.getElementById('btnExitImport').addEventListener('click',exitImport);
 document.getElementById('btnTrace').addEventListener('click',enterTrace);
 document.getElementById('btnImpView').addEventListener('click',toggleImpView);
-['traceSnap','traceCurve'].forEach(id=>{ const e=document.getElementById(id); if(e){ e.addEventListener('input',draw); e.addEventListener('change',draw); } });
+['traceSnap','traceCurve','traceGap'].forEach(id=>{ const e=document.getElementById(id); if(e){ e.addEventListener('input',draw); e.addEventListener('change',draw); } });
 document.getElementById('tbUndo').addEventListener('click',traceUndo);
 document.getElementById('tbNext').addEventListener('click',()=>{ traceNewShape(); updateTraceBar(); });
 document.getElementById('tbDone').addEventListener('click',doneTrace);
@@ -4312,7 +4324,7 @@ function setupCollapsibleGroups(){
 setupCollapsibleGroups();
 
 /* boot */
-const APP_VERSION = 'build 88 (2026-07-29)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 89 (2026-07-29)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
