@@ -395,6 +395,9 @@
   <div class="tbRow">
     <span style="width:84px;flex:none">close gaps</span><input type="range" id="traceGap" min="0" max="14" step="0.5" value="3" style="flex:1" title="Grow each creature outward so adjacent shapes overlap and the gap between them (and white slivers when tiled) closes. 0 = exact traced edges.">
   </div>
+  <div class="tbRow">
+    <span style="width:84px;flex:none">weld pull</span><input type="range" id="traceWeld" min="4" max="40" step="1" value="16" style="flex:1" title="How far apart two edges can be for 🔥 Weld edges to pull them onto a shared seam (world px). Bigger = welds more aggressively. Takes effect when you click 🔥.">
+  </div>
   <div class="tbHint"><b>Shift-click</b> = add point · <b>drag</b> a dot = move · <b>double-click</b> a dot = ◻ sharp / ◯ smooth · <b>right-click</b> = delete · click the <b>white dot</b> to close · <b>Space-drag</b> or scroll = pan / zoom</div>
 </div>
 
@@ -1280,7 +1283,7 @@ function weldSeams(){
   pushUndo();
   const lat = importTile && importTile.lat;
   const cvv=parseFloat((document.getElementById('traceCurve')||{}).value)||0.85;
-  const TH=16, TH2=TH*TH;   // world px: how close two edges must be to count as the same seam
+  const TH=parseFloat((document.getElementById('traceWeld')||{}).value)||16, TH2=TH*TH;   // slider: how close two edges must be to weld onto a shared seam (world px)
   const latOff = lat ? (()=>{const o=[]; for(let a=-1;a<=1;a++) for(let b=-1;b<=1;b++) o.push({dx:a*lat.v1.x+b*lat.v2.x, dy:a*lat.v1.y+b*lat.v2.y}); return o;})() : [{dx:0,dy:0}];
   for(let it=0; it<4; it++){
     const dense = traceShapes.map(s=> (s.closed&&s.pts.length>=3)? sampleClosed(s.pts, cvv) : null);   // pass-start geometry
@@ -4372,7 +4375,7 @@ function setupCollapsibleGroups(){
 setupCollapsibleGroups();
 
 /* boot */
-const APP_VERSION = 'build 92 (2026-07-29)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 93 (2026-07-29)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
