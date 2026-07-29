@@ -1328,7 +1328,9 @@ function drawTraceOverlay(){
     }
   }
   // open shapes + editable dots (only while editing, not in the clean tiled view)
-  if(!lat){ traceShapes.forEach((sh,si)=>{ const active=(si===traceActive);
+  // editable dots (base copy) whenever we're in a trace session — shown even over the live tiling, so
+  // dragging a point re-tiles instantly. After "Done" (traceMode off) they're hidden for a clean pattern.
+  if(traceMode){ traceShapes.forEach((sh,si)=>{ const active=(si===traceActive);
     if(!(sh.closed && sh.pts.length>=3)){ const scr=sh.pts.map(p=>traceW2S(p.x,p.y)); if(scr.length){ ctx.beginPath(); scr.forEach((s,i)=>i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y)); ctx.lineWidth=2; ctx.strokeStyle=sh.color; ctx.stroke(); } }
     sh.pts.forEach((p,pi)=>{ const s=traceW2S(p.x,p.y); ctx.fillStyle=(active&&pi===0)?'#fff':sh.color; ctx.strokeStyle='#0a0d12'; ctx.lineWidth=1.6;
       if(p.corner){ ctx.beginPath(); ctx.rect(s.x-4.5,s.y-4.5,9,9); ctx.fill(); ctx.stroke(); }
@@ -4324,7 +4326,7 @@ function setupCollapsibleGroups(){
 setupCollapsibleGroups();
 
 /* boot */
-const APP_VERSION = 'build 89 (2026-07-29)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 90 (2026-07-29)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
