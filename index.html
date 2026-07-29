@@ -380,6 +380,7 @@
   </div>
   <div class="tbRow">
     <button id="tbTile" title="Tile your traced creatures into a repeating pattern (auto-detects the repeat). Click again to go back to editing." style="background:#2f7d54">🧩 Tile the shapes into a pattern</button>
+    <button id="tbWeld" title="Weld shared edges: snap points where two shapes run close together onto a common seam, so adjacent creatures fit exactly — no gap, no overlap. (Undo with ⌘Z.)" style="background:#a8641e">🔥 Weld edges</button>
   </div>
   <div class="tbRow">
     <button class="ghost" id="tbExport" title="Download the pattern as a PNG (dots hidden — clean)">⬇ Export PNG</button>
@@ -1271,6 +1272,30 @@ function assembleTiling(){
   const b=document.getElementById('btnAssemble'); if(b) b.textContent = traceTiled ? '✏️ Back to editing shapes' : '🧩 Tile the shapes into a pattern';
   draw();
 }
+// 🔥 WELD: snap each shape's control points that run close to ANOTHER shape's edge (or a lattice-neighbour copy)
+// onto the shared midline, so adjacent creatures genuinely share the boundary (no gap, no overlap). Iterates to converge.
+function weldSeams(){
+  const shapes=traceShapes.filter(s=>s.closed && s.pts.length>=3); if(shapes.length<1) return;
+  if(importTile && !importTile.lat) importTile.lat = computeLattice2D(importTile.full||importTile.img);
+  pushUndo();
+  const lat = importTile && importTile.lat;
+  const cvv=parseFloat((document.getElementById('traceCurve')||{}).value)||0.85;
+  const TH=16, TH2=TH*TH;   // world px: how close two edges must be to count as the same seam
+  const latOff = lat ? (()=>{const o=[]; for(let a=-1;a<=1;a++) for(let b=-1;b<=1;b++) o.push({dx:a*lat.v1.x+b*lat.v2.x, dy:a*lat.v1.y+b*lat.v2.y}); return o;})() : [{dx:0,dy:0}];
+  for(let it=0; it<4; it++){
+    const dense = traceShapes.map(s=> (s.closed&&s.pts.length>=3)? sampleClosed(s.pts, cvv) : null);   // pass-start geometry
+    for(let si=0; si<traceShapes.length; si++){ const sh=traceShapes[si]; if(!(sh.closed&&sh.pts.length>=3)) continue;
+      for(const p of sh.pts){ let best=null, bd=TH2;
+        for(let sj=0; sj<traceShapes.length; sj++){ const dj=dense[sj]; if(!dj) continue;
+          for(const off of latOff){ if(sj===si && off.dx===0 && off.dy===0) continue;   // don't weld a shape to its own base copy
+            for(const q of dj){ const qx=q.x+off.dx, qy=q.y+off.dy, d=(p.x-qx)*(p.x-qx)+(p.y-qy)*(p.y-qy); if(d<bd){ bd=d; best={x:qx,y:qy}; } } } }
+        if(best){ p.x=(p.x+best.x)/2; p.y=(p.y+best.y)/2; }   // move halfway to the neighbour → both converge to the shared midline
+      }
+    }
+  }
+  dropToast('🔥 Welded shared edges — adjacent shapes now meet on a common seam.');
+  draw();
+}
 const TRACE_COLORS=['#c0472d','#e6d2a8','#3d8f6e','#caa14a','#5a7fb0','#9b5fb0'];
 function buildTraceGrad(){ const d=impDims(), W=d.W, H=d.H, src=impImg(); if(!src){ traceGrad=null; return; }
   const c=document.createElement('canvas'); c.width=W; c.height=H; const g=c.getContext('2d'); g.drawImage(src,0,0,W,H);
@@ -2092,6 +2117,7 @@ document.getElementById('tbExport').addEventListener('click',()=>{ _traceExport=
   try{ const sc=parseInt((document.getElementById('pngScale')||{}).value)||2; const a=document.createElement('a'); a.download='tessellation.png'; a.href=renderToDataURL(sc); a.click(); }
   finally{ _traceExport=false; draw(); } });
 document.getElementById('tbSave').addEventListener('click',()=>{ const b=document.getElementById('btnSave'); if(b) b.click(); });
+document.getElementById('tbWeld').addEventListener('click',weldSeams);
 document.getElementById('tbTile').addEventListener('click',()=>{ if(!traceTiled) traceCloseActive(); assembleTiling();
   const b=document.getElementById('tbTile'); if(b) b.textContent = traceTiled ? '✏️ Back to editing shapes' : '🧩 Tile the shapes into a pattern'; });
 document.getElementById('btnConvertEdit').addEventListener('click',convertImportToEditable);
@@ -4346,7 +4372,7 @@ function setupCollapsibleGroups(){
 setupCollapsibleGroups();
 
 /* boot */
-const APP_VERSION = 'build 91 (2026-07-29)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 92 (2026-07-29)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
