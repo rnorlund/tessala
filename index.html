@@ -1314,8 +1314,11 @@ function buildTraceGrad(){ const d=impDims(), W=d.W, H=d.H, src=impImg(); if(!sr
   for(let y=1;y<H-1;y++) for(let x=1;x<W-1;x++){ const gx=gray[y*W+x+1]-gray[y*W+x-1], gy=gray[(y+1)*W+x]-gray[(y-1)*W+x]; mag[y*W+x]=Math.min(255,Math.round(Math.hypot(gx,gy))); }
   traceGrad=mag; traceGW=W; traceGH=H;
 }
-function nearestTraceEdge(sp){ let best=null; traceShapes.forEach((sh,si)=>{ const n=sh.pts.length; if(n<2) return; const lim=sh.closed?n:n-1;
-  for(let k=0;k<lim;k++){ const a=traceW2S(sh.pts[k].x,sh.pts[k].y), b=traceW2S(sh.pts[(k+1)%n].x,sh.pts[(k+1)%n].y), m={x:(a.x+b.x)/2,y:(a.y+b.y)/2}, d=(m.x-sp.x)**2+(m.y-sp.y)**2; if(!best||d<best.d) best={si,k:k+1,d}; } }); return best; }
+function nearestTraceEdge(sp){ let best=null;   // nearest EDGE segment (true point-to-segment distance) → where a new point should be inserted
+  const segD=(p,a,b)=>{ const dx=b.x-a.x,dy=b.y-a.y,L2=dx*dx+dy*dy||1; let t=((p.x-a.x)*dx+(p.y-a.y)*dy)/L2; t=t<0?0:t>1?1:t; const cx=a.x+t*dx,cy=a.y+t*dy; return (p.x-cx)**2+(p.y-cy)**2; };
+  traceShapes.forEach((sh,si)=>{ const n=sh.pts.length; if(n<2) return; const lim=sh.closed?n:n-1;
+    for(let k=0;k<lim;k++){ const a=traceW2S(sh.pts[k].x,sh.pts[k].y), b=traceW2S(sh.pts[(k+1)%n].x,sh.pts[(k+1)%n].y), d=segD(sp,a,b); if(!best||d<best.d) best={si,k:k+1,d}; } });
+  return best; }
 // corner-aware closed Catmull-Rom → square points give sharp corners, round points give smooth curves
 // c ∈ [0,1]: 0 = straight polygon (angular), 1 = fully rounded Catmull-Rom through the smooth points. Corner points stay sharp.
 // grow (d>0) / shrink a closed polygon along its outward vertex normals — used to close white slivers between tiles
@@ -1422,15 +1425,22 @@ function doneTrace(){ traceCloseActive(); traceShapes=traceShapes.filter(s=>s.pt
 function tracePlace(sp){ const w=traceS2W(sp.x,sp.y); const sn=document.getElementById('traceSnap'); return (sn&&sn.checked)?snapWorld(w):w; }
 function traceHitInShape(sp, si){ const sh=traceShapes[si]; if(!sh) return null; let hit=null,bd=12*12;
   sh.pts.forEach((p,pi)=>{ const s=traceW2S(p.x,p.y),d=(s.x-sp.x)**2+(s.y-sp.y)**2; if(d<bd){bd=d;hit={si,pi};} }); return hit; }
-// Shift-click = ADD to the shape you're drawing (only its OWN dots grab, so you can trace right up against other shapes).
-// Plain click = grab ANY dot to move it.
+// Two modes:
+//  • BUILD  (an OPEN active shape is being drawn) → Shift-click appends to THAT shape; only its own dots grab.
+//  • EDIT   (nothing being drawn — e.g. a reopened design) → Shift-click near a shape's edge INSERTS a point into
+//           that shape at the right spot; a Shift-click far from every shape starts a new creature.
 function traceDown(sp, add){
-  // clicking the white first dot of the active open shape closes it
-  if(traceActive>=0){ const sh=traceShapes[traceActive]; if(sh && sh.pts.length>=3){ const f=traceW2S(sh.pts[0].x,sh.pts[0].y); if((f.x-sp.x)**2+(f.y-sp.y)**2 < 13*13){ pushUndo(); sh.closed=true; traceActive=-1; draw(); return; } } }
-  if(add){                                                                     // SHIFT: adding to the active creature
-    if(traceActive>=0){ const own=traceHitInShape(sp, traceActive); if(own){ pushUndo(); traceDrag=own; draw(); return; }   // grab only THIS shape's own dots
-      pushUndo(); traceShapes[traceActive].pts.push(tracePlace(sp)); draw(); return; }
-    pushUndo(); traceShapes.push({pts:[tracePlace(sp)], color:TRACE_COLORS[traceShapes.length%TRACE_COLORS.length], closed:false}); traceActive=traceShapes.length-1; draw(); return;  // no active → start a new creature
+  const building = traceActive>=0 && traceShapes[traceActive] && !traceShapes[traceActive].closed;
+  // clicking the white first dot of the shape being drawn closes it
+  if(building){ const sh=traceShapes[traceActive]; if(sh.pts.length>=3){ const f=traceW2S(sh.pts[0].x,sh.pts[0].y); if((f.x-sp.x)**2+(f.y-sp.y)**2 < 13*13){ pushUndo(); sh.closed=true; traceActive=-1; draw(); return; } } }
+  if(add){
+    if(building){                                                              // BUILD: append to the shape you're drawing
+      const own=traceHitInShape(sp, traceActive); if(own){ pushUndo(); traceDrag=own; draw(); return; }   // grab only its own dots
+      pushUndo(); traceShapes[traceActive].pts.push(tracePlace(sp)); draw(); return;
+    }
+    const ins=nearestTraceEdge(sp);                                            // EDIT: insert into the nearest existing shape
+    if(ins && ins.d < 28*28){ pushUndo(); traceShapes[ins.si].pts.splice(ins.k,0,tracePlace(sp)); draw(); return; }
+    pushUndo(); traceShapes.push({pts:[tracePlace(sp)], color:TRACE_COLORS[traceShapes.length%TRACE_COLORS.length], closed:false}); traceActive=traceShapes.length-1; draw(); return;  // far from everything → new creature
   }
   const hit=traceHitPoint(sp); if(hit){ pushUndo(); traceDrag=hit; draw(); }   // plain click → grab ANY dot to move
 }
@@ -4386,7 +4396,7 @@ function setupCollapsibleGroups(){
 setupCollapsibleGroups();
 
 /* boot */
-const APP_VERSION = 'build 94 (2026-07-29)';   // auto-bumped by deploy.sh on each push
+const APP_VERSION = 'build 95 (2026-07-30)';   // auto-bumped by deploy.sh on each push
 document.getElementById('verPill').textContent=APP_VERSION;
 setPattern('sqT');
 resize();
